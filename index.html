@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="de" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<meta name="theme-color" content="#161616">
+<link rel="stylesheet" href="style.css">
+<title>GIF it to me Baby</title>
+</head>
+<body>
+
+<header>
+  <h1>GIF it to me Baby</h1>
+  <button class="icon" id="themeToggle" title="Toggle theme">◐</button>
+</header>
+<p class="sub">Erstellt animierte GIFs aus Bildern oder bearbeitet bestehende GIFs — komplett im Browser. Es wird nichts hochgeladen.</p>
+
+<div class="drop" id="drop">
+  <p><strong>Tippen zum Auswählen</strong><br>oder Bilder / GIFs hierher ziehen</p>
+  <input type="file" id="fileInput" accept="image/*" multiple>
+</div>
+
+<div class="card">
+  <div class="row">
+    <label class="label-main" style="min-width:120px;">Bildwechsel</label>
+    <input type="number" id="frameDuration" min="20" step="10" value="200">
+    <span class="unit">ms / Frame</span>
+  </div>
+  <p class="field-hint">Gilt für neu hinzugefügte Bilder. Jeder Frame kann unten einzeln überschrieben werden.</p>
+</div>
+
+<div class="card">
+  <div class="row">
+    <label class="label-main" style="min-width:120px;">Auflösung</label>
+    <input type="number" id="outWidth" min="1" value="480" style="max-width:90px;">
+    <span class="unit">×</span>
+    <input type="number" id="outHeight" min="1" value="480" style="max-width:90px;">
+    <span class="unit">px</span>
+  </div>
+  <p class="field-hint">Frames werden proportional eingepasst (mit weißem Rand, falls nötig). Wird beim ersten hinzugefügten Bild automatisch vorgeschlagen.</p>
+</div>
+
+<div class="card">
+  <div class="row">
+    <label class="label-main" style="min-width:120px;">Qualität</label>
+    <input type="range" id="quality" min="1" max="30" value="10">
+    <span class="qty-val" id="qualityLabel">10</span>
+  </div>
+  <p class="field-hint">Niedriger = bessere Qualität, aber langsamer. Höher = schneller, gröber.</p>
+</div>
+
+<div class="card">
+  <div class="row">
+    <label class="label-main" style="min-width:120px;">Farbtiefe</label>
+    <select id="colors">
+      <option value="256" selected>256 Farben (beste Qualität)</option>
+      <option value="128">128 Farben</option>
+      <option value="64">64 Farben</option>
+      <option value="32">32 Farben</option>
+      <option value="16">16 Farben</option>
+      <option value="8">8 Farben</option>
+      <option value="4">4 Farben</option>
+      <option value="2">2 Farben (nur Schwarz/Weiß-artig)</option>
+    </select>
+  </div>
+  <p class="field-hint">Weniger Farben = kleinere Datei, aber sichtbare Farbstufen (Posterize-Effekt).</p>
+</div>
+
+<div class="card">
+  <div class="toggle-row">
+    <label class="label-main" for="loopInfinite">Endlosschleife</label>
+    <input type="checkbox" id="loopInfinite" checked>
+  </div>
+  <p class="field-hint">Wenn deaktiviert, läuft das GIF nur einmal ab.</p>
+</div>
+
+<button id="generateBtn" class="primary-btn">GIF erzeugen</button>
+<button id="clearAllBtn">Alle Frames entfernen</button>
+<p class="processing-hint" id="processingHint" style="display:none;"></p>
+
+<div id="frameList"></div>
+
+<div class="card" id="resultSection" style="display:none;">
+  <h2 class="result-title">Fertiges GIF</h2>
+  <img id="resultImg" class="result-img" alt="Erzeugtes GIF">
+  <p class="sizes" id="resultInfo"></p>
+  <a id="resultDl" class="dl-full">Download</a>
+</div>
+
+<footer>GIF it to me Baby · v1.0.0</footer>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gif.js/0.2.0/gif.js"></script>
+<script src="https://unpkg.com/gifuct-js@2.1.2/dist/gifuct-js.min.js"></script>
+<script>
+// ---------- Theme ----------
+const root = document.documentElement;
+const themeToggle = document.getElementById('themeToggle');
+function setTheme(t) {
+  root.setAttribute('data-theme', t);
+  localStorage.setItem('gifit-theme', t);
+  themeToggle.textContent = t === 'dark' ? '◐' : '◑';
+}
+setTheme(localStorage.getItem('gifit-theme') || 'dark');
+themeToggle.addEventListener('click', () => {
+  setTheme(root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+});
+
+// ---------- Elements ----------
+const drop = document.getElementById('drop');
+const fileInput = document.getElementById('fileInput');
+const frameDurationInput = document.getElementById('frameDuration');
+const outWidthInput = document.getElementById('outWidth');
+const outHeightInput = document.getElementById('outHeight');
+const qualityRange = document.getElementById('quality');
+const qualityLabel = document.getElementById('qualityLabel');
+const colorsSelect = document.getElementById('colors');
+const loopCheckbox = document.getElementById('loopInfinite');
+const generateBtn = document.getElementById('generateBtn');
+const clearAllBtn = document.getElementById('clearAllBtn');
+const processingHint = document.getElementById('processingHint');
+const frameListEl = document.getElementById('frameList');
+const resultSection = document.getElementById('resultSection');
+const resultImg = document.getElementById('resultImg');
+const resultInfo = document.getElementById('resultInfo');
+const resultDl = document.getElementById('resultDl');
+
+let frames = [];       // { id, canvas, duration }
+let frameCounter = 0;
+let dimsUserEdited = false;
+
+// Warn before an accidental reload/navigation throws away unsaved progress.
+window.addEventListener('beforeunload', (e) => {
+  if (frames.length > 0) {
+    e.preventDefault();
+    e.returnValue = '';
+  }
+});
+
+qualityRange.addEventListener('input', () => {
+  qualityLabel.textContent = qualityRange.value;
+});
+outWidthInput.addEventListener('input', () => { dimsUserEdited = true; });
+outHeightInput.addEventListener('input', () => { dimsUserEdited = true; });
+
+// ---------- Drag & drop / file picking ----------
+drop.addEventListener('click', () => fileInput.click());
+['dragenter', 'dragover'].forEach(ev => drop.addEventListener(ev, e => {
+  e.preventDefault(); drop.classList.add('drag');
+}));
+['dragleave', 'drop'].forEach(ev => drop.addEventListener(ev, e => {
+  e.preventDefault(); drop.classList.remove('drag');
+}));
+drop.addEventListener('drop', e => handleFiles(e.dataTransfer.files));
+fileInput.addEventListener('change', e => { handleFiles(e.target.files); fileInput.value = ''; });
+
+async function handleFiles(fileList) {
+  const files = Array.from(fileList).filter(f => f.type.startsWith('image/'));
+  if (files.length === 0) {
+    alert('Bitte Bild- oder GIF-Dateien wählen.');
+    return;
+  }
+  processingHint.style.display = 'block';
+  processingHint.textContent = 'Lade Dateien…';
+  for (const file of files) {
+    try {
+      if (file.type === 'image/gif') {
+        await addGifFrames(file);
+      } else {
+        await addImageFrame(file);
+      }
+    } catch (err) {
+      console.error(err);
+      alert(`Konnte "${file.name}" nicht laden.`);
+    }
+  }
+  processingHint.style.display = 'none';
+  renderFrames();
+}
+
+// ---------- Adding a plain image as a single frame ----------
+async function addImageFrame(file) {
+  const bitmap = await createImageBitmap(file);
+  const canvas = document.createElement('canvas');
+  canvas.width = bitmap.width;
+  canvas.height = bitmap.height;
+  canvas.getContext('2d').drawImage(bitmap, 0, 0);
+  bitmap.close();
+  maybeAutoSetDims(canvas.width, canvas.height);
+  pushFrame(canvas, parseInt(frameDurationInput.value) || 200);
+}
+
+// ---------- Adding all frames of an existing GIF, composited per disposal method ----------
+async function addGifFrames(file) {
+  if (!window.gifuct) {
+    alert('GIF-Decoder konnte nicht geladen werden (kein Internetzugriff?). Bestehende GIFs können daher nicht bearbeitet werden.');
+    return;
+  }
+  const buf = await file.arrayBuffer();
+  const parsed = window.gifuct.parseGIF(buf);
+  const gifFrames = window.gifuct.decompressFrames(parsed, true);
+  if (gifFrames.length === 0) return;
+
+  const gw = parsed.lsd.width;
+  const gh = parsed.lsd.height;
+  const composite = document.createElement('canvas');
+  composite.width = gw;
+  composite.height = gh;
+  const cctx = composite.getContext('2d');
+  let savedForRestore = null;
+
+  maybeAutoSetDims(gw, gh);
+
+  gifFrames.forEach(frame => {
+    if (frame.disposalType === 3) {
+      savedForRestore = cctx.getImageData(0, 0, gw, gh);
+    }
+    const patchCanvas = document.createElement('canvas');
+    patchCanvas.width = frame.dims.width;
+    patchCanvas.height = frame.dims.height;
+    patchCanvas.getContext('2d').putImageData(
+      new ImageData(frame.patch, frame.dims.width, frame.dims.height), 0, 0
+    );
+    cctx.drawImage(patchCanvas, frame.dims.left, frame.dims.top);
+
+    // Snapshot the fully composited frame for our own frame list.
+    const snap = document.createElement('canvas');
+    snap.width = gw;
+    snap.height = gh;
+    snap.getContext('2d').drawImage(composite, 0, 0);
+    const delayMs = frame.delay && frame.delay > 0 ? frame.delay : (parseInt(frameDurationInput.value) || 200);
+    pushFrame(snap, delayMs);
+
+    if (frame.disposalType === 2) {
+      cctx.clearRect(frame.dims.left, frame.dims.top, frame.dims.width, frame.dims.height);
+    } else if (frame.disposalType === 3 && savedForRestore) {
+      cctx.putImageData(savedForRestore, 0, 0);
+    }
+  });
+}
+
+function maybeAutoSetDims(w, h) {
+  if (frames.length === 0 && !dimsUserEdited) {
+    outWidthInput.value = w;
+    outHeightInput.value = h;
+  }
+}
+
+function pushFrame(canvas, duration) {
+  frames.push({ id: ++frameCounter, canvas, duration });
+}
+
+// ---------- Frame list UI ----------
+function renderFrames() {
+  frameListEl.innerHTML = '';
+  frames.forEach((f, i) => {
+    const row = document.createElement('div');
+    row.className = 'item';
+
+    const thumb = document.createElement('canvas');
+    thumb.width = 44; thumb.height = 44;
+    const tctx = thumb.getContext('2d');
+    const scale = Math.min(44 / f.canvas.width, 44 / f.canvas.height);
+    const tw = f.canvas.width * scale, th = f.canvas.height * scale;
+    tctx.drawImage(f.canvas, (44 - tw) / 2, (44 - th) / 2, tw, th);
+
+    const info = document.createElement('div');
+    info.className = 'info';
+    const label = document.createElement('div');
+    label.className = 'name';
+    label.textContent = `Frame ${i + 1} · ${f.canvas.width}×${f.canvas.height}`;
+    const durRow = document.createElement('div');
+    durRow.className = 'sizes';
+    const durInput = document.createElement('input');
+    durInput.type = 'number';
+    durInput.min = '20';
+    durInput.step = '10';
+    durInput.value = f.duration;
+    durInput.className = 'frame-dur';
+    durInput.addEventListener('input', () => {
+      f.duration = parseInt(durInput.value) || f.duration;
+    });
+    durRow.appendChild(durInput);
+    durRow.append(' ms');
+    info.appendChild(label);
+    info.appendChild(durRow);
+
+    const upBtn = document.createElement('button');
+    upBtn.className = 'icon small';
+    upBtn.textContent = '↑';
+    upBtn.disabled = i === 0;
+    upBtn.addEventListener('click', () => { moveFrame(i, -1); });
+
+    const downBtn = document.createElement('button');
+    downBtn.className = 'icon small';
+    downBtn.textContent = '↓';
+    downBtn.disabled = i === frames.length - 1;
+    downBtn.addEventListener('click', () => { moveFrame(i, 1); });
+
+    const remove = document.createElement('button');
+    remove.className = 'remove';
+    remove.innerHTML = '&times;';
+    remove.title = 'Entfernen';
+    remove.addEventListener('click', () => {
+      frames.splice(i, 1);
+      renderFrames();
+    });
+
+    row.appendChild(thumb);
+    row.appendChild(info);
+    row.appendChild(upBtn);
+    row.appendChild(downBtn);
+    row.appendChild(remove);
+    frameListEl.appendChild(row);
+  });
+  updateBulkButtons();
+}
+
+function moveFrame(index, dir) {
+  const newIndex = index + dir;
+  if (newIndex < 0 || newIndex >= frames.length) return;
+  const tmp = frames[index];
+  frames[index] = frames[newIndex];
+  frames[newIndex] = tmp;
+  renderFrames();
+}
+
+function updateBulkButtons() {
+  clearAllBtn.style.display = frames.length > 0 ? 'block' : 'none';
+  generateBtn.style.display = frames.length > 0 ? 'block' : 'none';
+}
+updateBulkButtons();
+
+clearAllBtn.addEventListener('click', () => {
+  if (frames.length === 0) return;
+  if (!confirm(`Alle ${frames.length} Frames entfernen? Das kann nicht rückgängig gemacht werden.`)) return;
+  frames = [];
+  dimsUserEdited = false;
+  renderFrames();
+  resultSection.style.display = 'none';
+});
+
+// ---------- Color depth reduction (simple uniform posterize, applied at export time only) ----------
+function quantizeImageData(imageData, colors) {
+  const levels = Math.max(2, Math.round(Math.cbrt(colors)));
+  const step = 255 / (levels - 1);
+  const d = imageData.data;
+  for (let i = 0; i < d.length; i += 4) {
+    d[i] = Math.round(Math.round(d[i] / step) * step);
+    d[i + 1] = Math.round(Math.round(d[i + 1] / step) * step);
+    d[i + 2] = Math.round(Math.round(d[i + 2] / step) * step);
+  }
+}
+
+// ---------- GIF generation ----------
+generateBtn.addEventListener('click', generateGif);
+
+function generateGif() {
+  if (frames.length === 0) return;
+  generateBtn.disabled = true;
+  resultSection.style.display = 'none';
+  processingHint.style.display = 'block';
+  processingHint.textContent = 'Erzeuge GIF… 0%';
+
+  const outW = parseInt(outWidthInput.value) || 480;
+  const outH = parseInt(outHeightInput.value) || 480;
+  const colors = parseInt(colorsSelect.value);
+  const quality = parseInt(qualityRange.value);
+  const repeat = loopCheckbox.checked ? 0 : -1;
+
+  const encoder = new GIF({
+    workers: 2,
+    quality,
+    width: outW,
+    height: outH,
+    repeat,
+    workerScript: 'https://cdnjs.cloudflare.com/ajax/libs/gif.js/0.2.0/gif.worker.js'
+  });
+
+  frames.forEach(f => {
+    const outCanvas = document.createElement('canvas');
+    outCanvas.width = outW;
+    outCanvas.height = outH;
+    const ctx = outCanvas.getContext('2d');
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, outW, outH);
+    const scale = Math.min(outW / f.canvas.width, outH / f.canvas.height);
+    const dw = f.canvas.width * scale;
+    const dh = f.canvas.height * scale;
+    const dx = (outW - dw) / 2;
+    const dy = (outH - dh) / 2;
+    ctx.drawImage(f.canvas, dx, dy, dw, dh);
+    if (colors < 256) {
+      const imgData = ctx.getImageData(0, 0, outW, outH);
+      quantizeImageData(imgData, colors);
+      ctx.putImageData(imgData, 0, 0);
+    }
+    encoder.addFrame(outCanvas, { delay: f.duration, copy: true });
+  });
+
+  encoder.on('progress', (p) => {
+    processingHint.textContent = `Erzeuge GIF… ${Math.round(p * 100)}%`;
+  });
+  encoder.on('finished', (blob) => {
+    processingHint.style.display = 'none';
+    generateBtn.disabled = false;
+    showResult(blob);
+  });
+  encoder.render();
+}
+
+function formatSize(bytes) {
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+  return (bytes / 1024 / 1024).toFixed(2) + ' MB';
+}
+
+function showResult(blob) {
+  const url = URL.createObjectURL(blob);
+  resultImg.src = url;
+  resultInfo.textContent = `Größe: ${formatSize(blob.size)} · ${frames.length} Frames`;
+  resultDl.href = url;
+  resultDl.download = 'gifit.gif';
+  resultDl.textContent = 'GIF herunterladen';
+  resultSection.style.display = 'block';
+  resultSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+</script>
+
+</body>
+</html>
