@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="de" data-theme="dark">
+<html lang="en" data-theme="dark">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
@@ -13,84 +13,91 @@
   <h1>GIF it to me Baby</h1>
   <button class="icon" id="themeToggle" title="Toggle theme">◐</button>
 </header>
-<p class="sub">Erstellt animierte GIFs aus Bildern oder bearbeitet bestehende GIFs — komplett im Browser. Es wird nichts hochgeladen.</p>
+<p class="sub">Turns images into an animated GIF, or edits an existing GIF — entirely in your browser. Nothing is ever uploaded.</p>
 
 <div class="drop" id="drop">
-  <p><strong>Tippen zum Auswählen</strong><br>oder Bilder / GIFs hierher ziehen</p>
+  <p><strong>Tap to choose files</strong><br>or drag & drop images / GIFs here</p>
   <input type="file" id="fileInput" accept="image/*" multiple>
 </div>
 
 <div class="card">
   <div class="row">
-    <label class="label-main" style="min-width:120px;">Bildwechsel</label>
+    <label class="label-main" style="min-width:120px;">Frame duration</label>
     <input type="number" id="frameDuration" min="20" step="10" value="200">
-    <span class="unit">ms / Frame</span>
+    <span class="unit">ms / frame</span>
   </div>
-  <p class="field-hint">Gilt für neu hinzugefügte Bilder. Jeder Frame kann unten einzeln überschrieben werden.</p>
+  <p class="field-hint">Applies to newly added frames. Each frame can be overridden individually below.</p>
 </div>
 
 <div class="card">
   <div class="row">
-    <label class="label-main" style="min-width:120px;">Auflösung</label>
+    <label class="label-main" style="min-width:120px;">Resolution</label>
     <input type="number" id="outWidth" min="1" value="480" style="max-width:90px;">
     <span class="unit">×</span>
     <input type="number" id="outHeight" min="1" value="480" style="max-width:90px;">
     <span class="unit">px</span>
   </div>
-  <p class="field-hint">Frames werden proportional eingepasst (mit weißem Rand, falls nötig). Wird beim ersten hinzugefügten Bild automatisch vorgeschlagen.</p>
+  <p class="field-hint">Frames are scaled to fit proportionally (padded with white if the aspect ratio doesn't match). Auto-filled from the first frame you add.</p>
 </div>
 
 <div class="card">
   <div class="row">
-    <label class="label-main" style="min-width:120px;">Qualität</label>
+    <label class="label-main" style="min-width:120px;">Quality</label>
     <input type="range" id="quality" min="1" max="30" value="10">
     <span class="qty-val" id="qualityLabel">10</span>
   </div>
-  <p class="field-hint">Niedriger = bessere Qualität, aber langsamer. Höher = schneller, gröber.</p>
+  <p class="field-hint">Lower = better quality but slower. Higher = faster but coarser.</p>
 </div>
 
 <div class="card">
   <div class="row">
-    <label class="label-main" style="min-width:120px;">Farbtiefe</label>
+    <label class="label-main" style="min-width:120px;">Color depth</label>
     <select id="colors">
-      <option value="256" selected>256 Farben (beste Qualität)</option>
-      <option value="128">128 Farben</option>
-      <option value="64">64 Farben</option>
-      <option value="32">32 Farben</option>
-      <option value="16">16 Farben</option>
-      <option value="8">8 Farben</option>
-      <option value="4">4 Farben</option>
-      <option value="2">2 Farben (nur Schwarz/Weiß-artig)</option>
+      <option value="256" selected>256 colors (best quality)</option>
+      <option value="128">128 colors</option>
+      <option value="64">64 colors</option>
+      <option value="32">32 colors</option>
+      <option value="16">16 colors</option>
+      <option value="8">8 colors</option>
+      <option value="4">4 colors</option>
+      <option value="2">2 colors (near black & white)</option>
     </select>
   </div>
-  <p class="field-hint">Weniger Farben = kleinere Datei, aber sichtbare Farbstufen (Posterize-Effekt).</p>
+  <p class="field-hint">Fewer colors = smaller file, but visible color banding (posterize effect).</p>
 </div>
 
 <div class="card">
   <div class="toggle-row">
-    <label class="label-main" for="loopInfinite">Endlosschleife</label>
+    <label class="label-main" for="loopInfinite">Loop forever</label>
     <input type="checkbox" id="loopInfinite" checked>
   </div>
-  <p class="field-hint">Wenn deaktiviert, läuft das GIF nur einmal ab.</p>
+  <p class="field-hint">If unchecked, the GIF plays once and stops.</p>
 </div>
 
-<button id="generateBtn" class="primary-btn">GIF erzeugen</button>
-<button id="clearAllBtn">Alle Frames entfernen</button>
+<button id="generateBtn" class="primary-btn">Generate GIF</button>
+<button id="clearAllBtn">Remove all frames</button>
 <p class="processing-hint" id="processingHint" style="display:none;"></p>
 
 <div id="frameList"></div>
 
 <div class="card" id="resultSection" style="display:none;">
-  <h2 class="result-title">Fertiges GIF</h2>
-  <img id="resultImg" class="result-img" alt="Erzeugtes GIF">
+  <h2 class="result-title">Your GIF</h2>
+  <img id="resultImg" class="result-img" alt="Generated GIF">
   <p class="sizes" id="resultInfo"></p>
   <a id="resultDl" class="dl-full">Download</a>
 </div>
 
-<footer>GIF it to me Baby · v1.0.0</footer>
+<footer>GIF it to me Baby · v1.0.2</footer>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/gif.js/0.2.0/gif.js"></script>
-<script src="https://unpkg.com/gifuct-js@2.1.2/dist/gifuct-js.min.js"></script>
+<!--
+  gif.js and gifuct-js are vendored locally in lib/ so the app has zero
+  external network dependencies at runtime — see lib/README.md for exactly
+  which files to place there. Do NOT point these at a CDN: that would defeat
+  the whole point of an offline-capable app, and dedicated Web Workers
+  (used by gif.js) can't even be loaded cross-origin from most CDNs anyway.
+-->
+<script src="lib/gif.js"></script>
+<script src="lib/gifuct-js.min.js"></script>
 <script>
 // ---------- Theme ----------
 const root = document.documentElement;
@@ -156,11 +163,11 @@ fileInput.addEventListener('change', e => { handleFiles(e.target.files); fileInp
 async function handleFiles(fileList) {
   const files = Array.from(fileList).filter(f => f.type.startsWith('image/'));
   if (files.length === 0) {
-    alert('Bitte Bild- oder GIF-Dateien wählen.');
+    alert('Please choose image or GIF files.');
     return;
   }
   processingHint.style.display = 'block';
-  processingHint.textContent = 'Lade Dateien…';
+  processingHint.textContent = 'Loading files…';
   for (const file of files) {
     try {
       if (file.type === 'image/gif') {
@@ -170,7 +177,7 @@ async function handleFiles(fileList) {
       }
     } catch (err) {
       console.error(err);
-      alert(`Konnte "${file.name}" nicht laden.`);
+      alert(`Could not load "${file.name}".`);
     }
   }
   processingHint.style.display = 'none';
@@ -192,7 +199,7 @@ async function addImageFrame(file) {
 // ---------- Adding all frames of an existing GIF, composited per disposal method ----------
 async function addGifFrames(file) {
   if (!window.gifuct) {
-    alert('GIF-Decoder konnte nicht geladen werden (kein Internetzugriff?). Bestehende GIFs können daher nicht bearbeitet werden.');
+    alert('The GIF decoder (lib/gifuct-js.min.js) is missing or failed to load — see lib/README.md. Existing GIFs can\'t be edited without it.');
     return;
   }
   const buf = await file.arrayBuffer();
@@ -299,7 +306,7 @@ function renderFrames() {
     const remove = document.createElement('button');
     remove.className = 'remove';
     remove.innerHTML = '&times;';
-    remove.title = 'Entfernen';
+    remove.title = 'Remove';
     remove.addEventListener('click', () => {
       frames.splice(i, 1);
       renderFrames();
@@ -332,7 +339,7 @@ updateBulkButtons();
 
 clearAllBtn.addEventListener('click', () => {
   if (frames.length === 0) return;
-  if (!confirm(`Alle ${frames.length} Frames entfernen? Das kann nicht rückgängig gemacht werden.`)) return;
+  if (!confirm(`Remove all ${frames.length} frames? This can't be undone.`)) return;
   frames = [];
   dimsUserEdited = false;
   renderFrames();
@@ -359,8 +366,12 @@ function generateGif() {
   generateBtn.disabled = true;
   resultSection.style.display = 'none';
   processingHint.style.display = 'block';
-  processingHint.textContent = 'Erzeuge GIF… 0%';
+  processingHint.textContent = 'Generating GIF… 0%';
 
+  // gif.js spins up a dedicated Web Worker for encoding. Dedicated workers
+  // must be same-origin, so workerScript points at our own local lib/
+  // folder rather than a CDN — this also means rendering needs no network
+  // access at all once the page itself has loaded.
   const outW = parseInt(outWidthInput.value) || 480;
   const outH = parseInt(outHeightInput.value) || 480;
   const colors = parseInt(colorsSelect.value);
@@ -373,7 +384,7 @@ function generateGif() {
     width: outW,
     height: outH,
     repeat,
-    workerScript: 'https://cdnjs.cloudflare.com/ajax/libs/gif.js/0.2.0/gif.worker.js'
+    workerScript: 'lib/gif.worker.js'
   });
 
   frames.forEach(f => {
@@ -398,12 +409,17 @@ function generateGif() {
   });
 
   encoder.on('progress', (p) => {
-    processingHint.textContent = `Erzeuge GIF… ${Math.round(p * 100)}%`;
+    processingHint.textContent = `Generating GIF… ${Math.round(p * 100)}%`;
   });
   encoder.on('finished', (blob) => {
     processingHint.style.display = 'none';
     generateBtn.disabled = false;
     showResult(blob);
+  });
+  encoder.on('abort', () => {
+    processingHint.style.display = 'none';
+    generateBtn.disabled = false;
+    alert('GIF generation was aborted.');
   });
   encoder.render();
 }
@@ -417,10 +433,10 @@ function formatSize(bytes) {
 function showResult(blob) {
   const url = URL.createObjectURL(blob);
   resultImg.src = url;
-  resultInfo.textContent = `Größe: ${formatSize(blob.size)} · ${frames.length} Frames`;
+  resultInfo.textContent = `Size: ${formatSize(blob.size)} · ${frames.length} frames`;
   resultDl.href = url;
   resultDl.download = 'gifit.gif';
-  resultDl.textContent = 'GIF herunterladen';
+  resultDl.textContent = 'Download GIF';
   resultSection.style.display = 'block';
   resultSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
