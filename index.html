@@ -87,7 +87,7 @@
   <a id="resultDl" class="dl-full">Download</a>
 </div>
 
-<footer>GIF it to me Baby · v1.0.2</footer>
+<footer>GIF it to me Baby · v1.0.3</footer>
 
 <!--
   gif.js and gifuct-js are vendored locally in lib/ so the app has zero
@@ -97,7 +97,17 @@
   (used by gif.js) can't even be loaded cross-origin from most CDNs anyway.
 -->
 <script src="lib/gif.js"></script>
-<script src="lib/gifuct-js.min.js"></script>
+<!--
+  gifuct-js is only published as ES module source (no plain <script>-ready
+  build exists), so it's loaded as a module and attached to window.gifuct
+  here, before the classic script below runs. Module scripts execute in
+  order, before DOMContentLoaded, so window.gifuct is guaranteed to be set
+  by the time the user can interact with the page.
+-->
+<script type="module">
+  import { parseGIF, decompressFrames } from './lib/gifuct-js.esm.js';
+  window.gifuct = { parseGIF, decompressFrames };
+</script>
 <script>
 // ---------- Theme ----------
 const root = document.documentElement;
@@ -199,7 +209,7 @@ async function addImageFrame(file) {
 // ---------- Adding all frames of an existing GIF, composited per disposal method ----------
 async function addGifFrames(file) {
   if (!window.gifuct) {
-    alert('The GIF decoder (lib/gifuct-js.min.js) is missing or failed to load — see lib/README.md. Existing GIFs can\'t be edited without it.');
+    alert('The GIF decoder (lib/gifuct-js.esm.js) is missing or failed to load — see lib/README.md. Existing GIFs can\'t be edited without it.');
     return;
   }
   const buf = await file.arrayBuffer();
