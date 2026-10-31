@@ -1,38 +1,61 @@
-# lib/
+# GIF it to me Baby
 
-This app depends on two small third-party libraries. They must live in this
-folder as plain local files — **not** loaded from a CDN — so the app has no
-external network dependency at runtime and keeps working fully offline.
+A tiny, privacy-friendly web app that turns images into an animated GIF — or edits an existing one — entirely in your browser. No files are ever uploaded to a server.
 
-Download these files once and place them here, keeping the exact filenames:
+**Live at:** [gifit.michels.world](https://gifit.michels.world)
 
-| File to save as | Download from |
-|---|---|
-| `lib/gif.js` | https://cdnjs.cloudflare.com/ajax/libs/gif.js/0.2.0/gif.js |
-| `lib/gif.worker.js` | https://cdnjs.cloudflare.com/ajax/libs/gif.js/0.2.0/gif.worker.js |
-| `lib/gifuct-js.esm.js` | https://esm.sh/gifuct-js@2.1.2?standalone |
+## Features
 
-**Note on `gifuct-js.esm.js`:** `gifuct-js` is only published on npm as ES
-module source — there is no ready-made `dist/*.min.js` build to download, so
-a plain `<script src="...">` tag won't work with a file straight from
-npm/unpkg. The `esm.sh` URL above generates a single, self-contained ES
-module file with its one small dependency (`js-binary-schema-parser`)
-bundled in, so no further network requests happen when it runs. Save
-whatever that URL returns as `lib/gifuct-js.esm.js` — a browser "Save As"
-or `curl`/`wget` both work fine, it's just a `.js` text file.
+- Select or drag & drop multiple images (any browser-supported format: PNG, WEBP, JPG, BMP, …) — each image becomes its own GIF frame
+- **Load an existing GIF**: every frame is extracted individually (correctly composited according to its disposal method) and dropped into the same frame list as regular images — so you can keep editing, trim, reorder, or mix it with new images
+- Adjustable default options:
+  - **Frame duration (ms)** — default for newly added frames, overridable per frame in the list
+  - **Resolution (width × height)** — auto-filled from the first frame you add; all frames are scaled to fit proportionally (padded with white if the aspect ratio doesn't match)
+  - **Quality** — sampling rate of the color quantizer (1 = best quality/slowest, 30 = fastest/coarsest)
+  - **Color depth** — 2 to 256 colors; reduces the color count before encoding (simplified posterize-style quantization) for smaller file sizes
+  - **Loop forever** — on/off
+- Frame list with thumbnail preview, per-frame duration, up/down reordering, and removing individual frames
+- **Remove all frames** resets the list completely
+- Warns before an accidental page reload/navigation throws away unfinished work
+- Result is previewed directly on the page, with a download button
+- Dark mode by default, togglable from the header menu
+- Installable: works offline after the first visit, and can be added to a phone's home screen or a desktop's app list like a native app
+- Mobile-first layout
+- 100% client-side: no backend, no analytics, no image ever leaves the device
 
-`gif.js` (MIT license, https://github.com/jnordberg/gif.js) does the actual GIF
-encoding using a Web Worker — that worker is `gif.worker.js`, which is never
-loaded via a `<script>` tag, only referenced by path in `index.html` as
-`workerScript: 'lib/gif.worker.js'`.
+## How it works
 
-`gifuct-js` (MIT license, https://github.com/matt-way/gifuct-js) decodes an
-existing GIF's individual frames so they can be loaded into the frame list
-and edited. `index.html` loads it as a module and exposes it as
-`window.gifuct = { parseGIF, decompressFrames }` for the rest of the app to use.
+New images are decoded with `createImageBitmap()` and drawn onto an in-memory `<canvas>` at full resolution — that canvas is the internal "frame".
 
-After downloading, commit all three files to the repository alongside
-`index.html` and `style.css`. Once they're in place, the whole app — including
-generating and loading GIFs — runs with zero network requests; only the very
-first page load (fetching `index.html`, `style.css`, and the files in `lib/`)
-needs a connection, exactly like any other static site.
+Existing GIFs are parsed and decompressed with [gifuct-js](https://github.com/matt-way/gifuct-js). Since GIF frames often only contain a dirty rectangle and rely on the previous frame's disposal method, each frame is correctly composited onto a running canvas (handling both "restore to background" and "restore to previous") before being stored as a complete image in the frame list.
+
+When generating the GIF, each frame is scaled proportionally to the chosen output resolution, optionally reduced to the selected color depth via simple per-channel rounding, and encoded into an animated GIF file with [gif.js](https://github.com/jnordberg/gif.js) (which uses a Web Worker for NeuQuant quantization). The finished GIF is offered as a direct download via a blob URL.
+
+Offline support comes from a service worker (`sw.js`) that caches the app shell (`index.html`, `style.css`, `app.js`, icons, and the vendored libraries in `lib/`) using a stale-while-revalidate strategy: cached files are served instantly, while a fresh copy is fetched in the background for next time.
+
+## Files
+
+- `index.html` — markup
+- `style.css` — all styling
+- `app.js` — all app logic
+- `manifest.json` — PWA manifest (name, icons, theme colors)
+- `sw.js` — service worker for offline caching
+- `favicon.ico`, `android-chrome-192x192.png`, `android-chrome-512x512.png` — kept at the repo root (crawler/install-prompt compatibility)
+- `icons/` — `favicon-16x16.png`, `favicon-32x32.png`, `apple-touch-icon.png`, `logo.png` (used in the header and About modal)
+- `lib/` — vendored third-party libraries (see below) — **not included**, must be downloaded once, see `lib/README.md`
+- Push everything to the repo root; `index.html` links to the other files with relative paths
+
+## External libraries (vendored locally, not CDN)
+
+- [gif.js](https://github.com/jnordberg/gif.js) `0.2.0` — GIF encoding, including its `gif.worker.js` Web Worker
+- [gifuct-js](https://github.com/matt-way/gifuct-js) `2.1.2` — GIF decoding, used to edit existing GIFs; since it's only published as ES module source, it's fetched once as a self-contained bundle (see `lib/README.md`) rather than a plain `<script>`-ready file
+
+Both are loaded from the local `lib/` folder instead of a CDN, so the app has **no external network dependency at runtime** and keeps working fully offline once the page and its assets are cached or self-hosted. See `lib/README.md` for the exact download links and where to place each file — do this once before your first deploy.
+
+## Browser support
+
+Works in all modern browsers (Chrome, Safari, Firefox, Edge). Formats not natively decodable by the browser's `<img>`/`<canvas>` (e.g. HEIC in most non-Safari browsers) cannot be used. GIF generation runs in a same-origin Web Worker (`lib/gif.worker.js`) and needs no network access once the page and its assets have loaded.
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md).

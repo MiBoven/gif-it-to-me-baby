@@ -1,0 +1,22 @@
+{
+  "name": "GIF it to me Baby",
+  "short_name": "GIF it to me Baby",
+  "description": "Turns images into an animated GIF, or edits an existing GIF — entirely in your browser.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "theme_color": "#131313",
+  "background_color": "#131313",
+  "icons": [
+    {
+      "src": "/android-chrome-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/android-chrome-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
