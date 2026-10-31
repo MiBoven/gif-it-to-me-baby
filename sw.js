@@ -1,7 +1,7 @@
 // Service worker for GIF it to me Baby — stale-while-revalidate.
 // Bump CACHE_NAME whenever a deployed file changes, so old caches
 // get cleaned up and the new version is picked up.
-const CACHE_NAME = 'gifit-cache-v0.2.0';
+const CACHE_NAME = 'gifit-cache-v0.3.0';
 
 const PRECACHE_URLS = [
   './',

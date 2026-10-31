@@ -141,6 +141,13 @@ input[type=number], input[type=text], select {
 .primary-btn:active { opacity: .85; }
 .primary-btn:disabled { opacity: .5; }
 
+.secondary-btn {
+  display: block; width: 100%; background: var(--surface); color: var(--accent);
+  border: 1px solid var(--accent); padding: 12px; border-radius: 10px;
+  font-size: 14px; font-weight: 600; cursor: pointer; margin-bottom: 16px;
+}
+.secondary-btn:active { opacity: .8; }
+
 #clearAllBtn {
   width: 100%; background: none; border: 1px solid var(--border); color: var(--danger);
   padding: 10px; border-radius: 10px; font-size: 13px; font-weight: 600; cursor: pointer;
@@ -207,3 +214,37 @@ footer { text-align: center; color: var(--text-secondary); font-size: 12px; marg
   width: 100%; margin-top: 4px; padding: 10px; border-radius: 8px; border: 1px solid var(--border);
   background: none; color: var(--danger); font-size: 13.5px; font-weight: 600; cursor: pointer;
 }
+
+/* ---------- Morph editor (full-screen) ---------- */
+.morph-bg {
+  position: fixed; inset: 0; background: var(--bg); z-index: 40;
+  display: flex; justify-content: center; overflow-y: auto;
+}
+.morph-panel {
+  width: 100%; max-width: 720px; padding: 16px; padding-bottom: 60px;
+  display: flex; flex-direction: column; min-height: 100%;
+}
+.morph-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+.morph-header h2 { font-size: 18px; margin: 0; }
+
+.morph-upload-row { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 12px; }
+.morph-upload-slot {
+  flex: 1; min-width: 140px; aspect-ratio: 1; border: 2px dashed var(--border); border-radius: 12px;
+  background: var(--surface); cursor: pointer; position: relative; overflow: hidden;
+  display: flex; align-items: center; justify-content: center; text-align: center; padding: 10px;
+}
+.morph-upload-slot.filled { border-style: solid; border-color: var(--accent); }
+.morph-upload-slot .morph-upload-placeholder { color: var(--text-secondary); font-size: 13px; }
+.morph-upload-preview { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+
+.morph-canvases { display: flex; flex-direction: column; gap: 12px; margin-top: 12px; }
+.morph-canvas-wrap {
+  border: 1px solid var(--border); border-radius: 12px; overflow: hidden; background: var(--surface);
+}
+.morph-canvas-label {
+  font-size: 12px; font-weight: 600; color: var(--text-secondary); padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+}
+.morph-canvas-wrap canvas { display: block; width: 100%; height: auto; touch-action: none; cursor: crosshair; }
+
+.morph-point-toolbar { justify-content: flex-end; margin: 10px 0; }

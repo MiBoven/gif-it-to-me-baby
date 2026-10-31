@@ -53,6 +53,8 @@
   <input type="file" id="fileInput" accept="image/*" multiple>
 </div>
 
+<button type="button" class="secondary-btn" id="morphOpenBtn">🪄 Morph two images…</button>
+
 <div class="card">
   <div class="row">
     <label class="label-main">Frame duration</label>
@@ -120,7 +122,62 @@
   <a id="resultDl" class="dl-full">Download</a>
 </div>
 
-<footer>GIF it to me Baby · v0.2.0</footer>
+<footer>GIF it to me Baby · v0.3.0</footer>
+
+<!-- ---------- Morph editor (full-screen) ---------- -->
+<div class="morph-bg" id="morphBg" hidden>
+  <div class="morph-panel">
+    <div class="morph-header">
+      <h2>Morph two images</h2>
+      <button class="icon" id="morphCloseBtn" title="Cancel">✕</button>
+    </div>
+
+    <div id="morphUploadStep">
+      <p class="field-hint">Pick a start image and an end image. Both are fit to the current Resolution setting (<span id="morphResDisplay"></span>) — cancel and adjust it first if you want a different size.</p>
+      <div class="morph-upload-row">
+        <div class="morph-upload-slot" id="morphSlotA">
+          <input type="file" id="morphFileA" accept="image/*" hidden>
+          <img class="morph-upload-preview" id="morphPreviewA" hidden alt="">
+          <div class="morph-upload-placeholder" id="morphPlaceholderA">Tap to choose start image</div>
+        </div>
+        <div class="morph-upload-slot" id="morphSlotB">
+          <input type="file" id="morphFileB" accept="image/*" hidden>
+          <img class="morph-upload-preview" id="morphPreviewB" hidden alt="">
+          <div class="morph-upload-placeholder" id="morphPlaceholderB">Tap to choose end image</div>
+        </div>
+      </div>
+    </div>
+
+    <div id="morphPointStep" hidden>
+      <p class="field-hint">Tap anywhere on either image to add a matching pair of points, then drag each half into place over the same feature. The four corners are locked and always match. <span id="morphPointCount"></span></p>
+      <div class="morph-canvases">
+        <div class="morph-canvas-wrap">
+          <div class="morph-canvas-label">Start</div>
+          <canvas id="morphCanvasA"></canvas>
+        </div>
+        <div class="morph-canvas-wrap">
+          <div class="morph-canvas-label">End</div>
+          <canvas id="morphCanvasB"></canvas>
+        </div>
+      </div>
+      <div class="row morph-point-toolbar">
+        <button type="button" class="icon small" id="morphDeletePointBtn" disabled title="Delete selected point">🗑</button>
+        <button type="button" class="icon small" id="morphResetPointsBtn" title="Remove all added points">↺</button>
+      </div>
+
+      <div class="card">
+        <div class="row">
+          <label class="label-main">Morph steps</label>
+          <input type="number" id="morphSteps" min="2" max="60" value="10">
+        </div>
+        <p class="field-hint">Number of in-between frames generated (plus the start and end image themselves). Eased in/out automatically, so the morph starts and ends gently.</p>
+      </div>
+
+      <p class="processing-hint" id="morphProgress" hidden></p>
+      <button type="button" class="primary-btn" id="morphCreateBtn">Create frames</button>
+    </div>
+  </div>
+</div>
 
 <!-- ---------- Settings modal ---------- -->
 <div class="modal-bg" id="settingsModalBg" hidden>
@@ -137,7 +194,7 @@
   <div class="modal">
     <img src="icons/logo.png" class="about-logo" alt="">
     <h2>GIF it to me Baby</h2>
-    <p class="version-line">Version 0.2.0</p>
+    <p class="version-line">Version 0.3.0</p>
     <p>Turns images into an animated GIF, or edits an existing one — entirely in your browser. 100% client-side: no backend, no analytics, no image ever leaves your device.</p>
     <p class="credits">
       Built with <a href="https://github.com/jnordberg/gif.js" target="_blank" rel="noopener">gif.js</a>

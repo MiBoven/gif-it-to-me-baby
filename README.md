@@ -16,6 +16,7 @@ A tiny, privacy-friendly web app that turns images into an animated GIF — or e
   - **Loop forever** — on/off
 - Frame list with thumbnail preview, per-frame duration, up/down reordering, and removing individual frames
 - **Remove all frames** resets the list completely
+- **Morph two images…**: pick a start and an end image, place matching pairs of points on the features you want to track (the four corners lock in automatically), and generate a warp-morph between them as a sequence of frames eased in/out and appended to the frame list — see [How it works](#how-it-works)
 - Warns before an accidental page reload/navigation throws away unfinished work
 - Result is previewed directly on the page, with a download button
 - Dark mode by default, togglable from the header menu
@@ -30,6 +31,8 @@ New images are decoded with `createImageBitmap()` and drawn onto an in-memory `<
 Existing GIFs are parsed and decompressed with [gifuct-js](https://github.com/matt-way/gifuct-js). Since GIF frames often only contain a dirty rectangle and rely on the previous frame's disposal method, each frame is correctly composited onto a running canvas (handling both "restore to background" and "restore to previous") before being stored as a complete image in the frame list.
 
 When generating the GIF, each frame is scaled proportionally to the chosen output resolution, optionally reduced to the selected color depth via simple per-channel rounding, and encoded into an animated GIF file with [gif.js](https://github.com/jnordberg/gif.js) (which uses a Web Worker for NeuQuant quantization). The finished GIF is offered as a direct download via a blob URL.
+
+**Morphing** works by first fitting both images to the current Resolution setting, so they share the same coordinate space. The points you place (plus the four locked image corners) are connected into triangles with a small from-scratch Delaunay triangulation (Bowyer–Watson algorithm), computed once from the midpoint of each pair so the same mesh topology applies to the start image, the end image, and every in-between frame. For each frame, every triangle of the start image is affine-warped onto its interpolated shape and every triangle of the end image is warped onto that same shape, then the two warped results are cross-faded according to how far along the morph that frame is. The interpolation itself is eased in/out (cosine easing) rather than linear, so the morph starts and ends gently.
 
 Offline support comes from a service worker (`sw.js`) that caches the app shell (`index.html`, `style.css`, `app.js`, icons, and the vendored libraries in `lib/`) using a stale-while-revalidate strategy: cached files are served instantly, while a fresh copy is fetched in the background for next time.
 

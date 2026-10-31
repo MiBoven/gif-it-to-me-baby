@@ -2,6 +2,13 @@
 
 All notable changes to GIF it to me Baby are documented here.
 
+## 0.3.0 — 2026-10-31 — Image morphing
+
+- New **"Morph two images…"** tool: pick a start and an end image, place matching pairs of points on the features you want to track (the four image corners are locked in automatically), and generate a smooth warp-morph between them as a sequence of GIF frames, appended to the current frame list
+- Morph steps (number of in-between frames) are adjustable; timing is eased in/out automatically so the morph starts and ends gently rather than at constant speed
+- Both images are fit to the app's current Resolution setting before morphing, so the generated frames slot straight into the existing export pipeline (quality, color depth, loop, etc.) with no extra setup
+- Implemented from scratch with no new dependencies: a small Delaunay triangulation (Bowyer–Watson) keeps the point mesh consistent between the start and end shapes, and each triangle is affine-warped and cross-faded via `<canvas>` — the same technique used by dedicated morphing tools
+
 ## 0.2.0 — 2026-10-31 — Design & installability overhaul
 
 This release brings the app in line with the rest of the michels.world suite (reference: JPG75, Prepare 4 3W) and supersedes the earlier 1.0.x version numbers from before the suite's shared conventions existed — see the note at the end of this file.

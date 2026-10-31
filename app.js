@@ -313,6 +313,20 @@ function quantizeImageData(imageData, colors) {
   }
 }
 
+// Scales `drawable` (a canvas, bitmap, or image) proportionally to fit
+// inside outW×outH, padding with white — shared by GIF export and by the
+// morph tool's image loading, so both resize images the same way.
+function drawContainFit(ctx, drawable, srcW, srcH, outW, outH) {
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, outW, outH);
+  const scale = Math.min(outW / srcW, outH / srcH);
+  const dw = srcW * scale;
+  const dh = srcH * scale;
+  const dx = (outW - dw) / 2;
+  const dy = (outH - dh) / 2;
+  ctx.drawImage(drawable, dx, dy, dw, dh);
+}
+
 // ---------- GIF generation ----------
 generateBtn.addEventListener('click', generateGif);
 
@@ -347,14 +361,7 @@ function generateGif() {
     outCanvas.width = outW;
     outCanvas.height = outH;
     const ctx = outCanvas.getContext('2d');
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(0, 0, outW, outH);
-    const scale = Math.min(outW / f.canvas.width, outH / f.canvas.height);
-    const dw = f.canvas.width * scale;
-    const dh = f.canvas.height * scale;
-    const dx = (outW - dw) / 2;
-    const dy = (outH - dh) / 2;
-    ctx.drawImage(f.canvas, dx, dy, dw, dh);
+    drawContainFit(ctx, f.canvas, f.canvas.width, f.canvas.height, outW, outH);
     if (colors < 256) {
       const imgData = ctx.getImageData(0, 0, outW, outH);
       quantizeImageData(imgData, colors);
@@ -394,6 +401,457 @@ function showResult(blob) {
   resultDl.textContent = 'Download GIF';
   resultSection.hidden = false;
   resultSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+// ============================================================
+// Morph: warp-morph two images into a sequence of in-between frames
+// ============================================================
+//
+// Approach: the user places pairs of matching points on a start image (A)
+// and an end image (B) — always including the four locked image corners,
+// which guarantees full coverage. A single Delaunay triangulation is
+// computed once, from the midpoint of each pair, and its triangle indices
+// are then reused against A's positions, B's positions, and every
+// in-between (interpolated) position — this is the standard way these
+// "feature-based" morphs work, and it's what keeps the mesh topology
+// consistent across all generated frames. For each frame, every triangle
+// of A is affine-warped onto the interpolated shape, every triangle of B
+// is warped onto that same shape, and the two warped images are
+// cross-faded by how far along the morph that frame is.
+
+const morphOpenBtn = document.getElementById('morphOpenBtn');
+const morphBg = document.getElementById('morphBg');
+const morphCloseBtn = document.getElementById('morphCloseBtn');
+const morphUploadStep = document.getElementById('morphUploadStep');
+const morphPointStep = document.getElementById('morphPointStep');
+const morphSlotA = document.getElementById('morphSlotA');
+const morphSlotB = document.getElementById('morphSlotB');
+const morphFileA = document.getElementById('morphFileA');
+const morphFileB = document.getElementById('morphFileB');
+const morphPreviewA = document.getElementById('morphPreviewA');
+const morphPreviewB = document.getElementById('morphPreviewB');
+const morphPlaceholderA = document.getElementById('morphPlaceholderA');
+const morphPlaceholderB = document.getElementById('morphPlaceholderB');
+const morphCanvasA = document.getElementById('morphCanvasA');
+const morphCanvasB = document.getElementById('morphCanvasB');
+const morphPointCount = document.getElementById('morphPointCount');
+const morphDeletePointBtn = document.getElementById('morphDeletePointBtn');
+const morphResetPointsBtn = document.getElementById('morphResetPointsBtn');
+const morphStepsInput = document.getElementById('morphSteps');
+const morphProgress = document.getElementById('morphProgress');
+const morphCreateBtn = document.getElementById('morphCreateBtn');
+const morphResDisplay = document.getElementById('morphResDisplay');
+
+let morphImgA = null;   // { canvas } — pristine, fitted to outW×outH, never drawn on
+let morphImgB = null;
+let morphPoints = [];   // [{ ax, ay, bx, by, locked }] — index pairs A/B positions
+let morphSelectedIndex = -1;
+let morphDrag = null;   // { index, side }
+let morphPreviewUrlA = null;
+let morphPreviewUrlB = null;
+
+morphOpenBtn.addEventListener('click', () => {
+  morphImgA = null;
+  morphImgB = null;
+  morphPoints = [];
+  morphSelectedIndex = -1;
+  morphDrag = null;
+
+  [morphSlotA, morphSlotB].forEach(slot => slot.classList.remove('filled'));
+  [morphPreviewA, morphPreviewB].forEach(img => { img.hidden = true; });
+  [morphPlaceholderA, morphPlaceholderB].forEach(el => { el.hidden = false; });
+  morphPlaceholderA.textContent = 'Tap to choose start image';
+  morphPlaceholderB.textContent = 'Tap to choose end image';
+
+  const outW = parseInt(outWidthInput.value) || 480;
+  const outH = parseInt(outHeightInput.value) || 480;
+  morphResDisplay.textContent = `${outW}×${outH}px`;
+
+  morphUploadStep.hidden = false;
+  morphPointStep.hidden = true;
+  morphBg.hidden = false;
+});
+
+function closeMorphEditor() {
+  morphBg.hidden = true;
+}
+morphCloseBtn.addEventListener('click', closeMorphEditor);
+morphBg.addEventListener('click', (e) => { if (e.target === morphBg) closeMorphEditor(); });
+
+morphSlotA.addEventListener('click', () => morphFileA.click());
+morphSlotB.addEventListener('click', () => morphFileB.click());
+morphFileA.addEventListener('change', () => { handleMorphUpload('a', morphFileA.files[0]); morphFileA.value = ''; });
+morphFileB.addEventListener('change', () => { handleMorphUpload('b', morphFileB.files[0]); morphFileB.value = ''; });
+
+async function handleMorphUpload(side, file) {
+  if (!file) return;
+  const outW = parseInt(outWidthInput.value) || 480;
+  const outH = parseInt(outHeightInput.value) || 480;
+
+  let bitmap;
+  try {
+    bitmap = await createImageBitmap(file);
+  } catch (err) {
+    alert(`Could not load "${file.name}" as an image.`);
+    return;
+  }
+  const canvas = document.createElement('canvas');
+  canvas.width = outW;
+  canvas.height = outH;
+  drawContainFit(canvas.getContext('2d'), bitmap, bitmap.width, bitmap.height, outW, outH);
+  bitmap.close();
+
+  const slot = side === 'a' ? morphSlotA : morphSlotB;
+  const preview = side === 'a' ? morphPreviewA : morphPreviewB;
+  const placeholder = side === 'a' ? morphPlaceholderA : morphPlaceholderB;
+
+  canvas.toBlob((blob) => {
+    const url = URL.createObjectURL(blob);
+    if (side === 'a') { if (morphPreviewUrlA) URL.revokeObjectURL(morphPreviewUrlA); morphPreviewUrlA = url; }
+    else { if (morphPreviewUrlB) URL.revokeObjectURL(morphPreviewUrlB); morphPreviewUrlB = url; }
+    preview.src = url;
+    preview.hidden = false;
+    placeholder.hidden = true;
+    slot.classList.add('filled');
+  });
+
+  if (side === 'a') morphImgA = { canvas }; else morphImgB = { canvas };
+
+  if (morphImgA && morphImgB) {
+    startMorphPointEditor(outW, outH);
+  }
+}
+
+function initMorphPoints(w, h) {
+  return [
+    { ax: 0, ay: 0, bx: 0, by: 0, locked: true },
+    { ax: w, ay: 0, bx: w, by: 0, locked: true },
+    { ax: w, ay: h, bx: w, by: h, locked: true },
+    { ax: 0, ay: h, bx: 0, by: h, locked: true }
+  ];
+}
+
+function startMorphPointEditor(outW, outH) {
+  morphPoints = initMorphPoints(outW, outH);
+  morphSelectedIndex = -1;
+  morphCanvasA.width = outW;
+  morphCanvasA.height = outH;
+  morphCanvasB.width = outW;
+  morphCanvasB.height = outH;
+  morphUploadStep.hidden = true;
+  morphPointStep.hidden = false;
+  renderMorphEditorCanvases();
+}
+
+function renderMorphEditorCanvases() {
+  drawMorphSide(morphCanvasA, morphImgA.canvas, 'a');
+  drawMorphSide(morphCanvasB, morphImgB.canvas, 'b');
+  const extra = morphPoints.length - 4;
+  morphPointCount.textContent = extra === 1 ? '1 point pair added.' : `${extra} point pairs added.`;
+  morphDeletePointBtn.disabled = morphSelectedIndex === -1;
+}
+
+function drawMorphSide(canvas, baseCanvas, side) {
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.drawImage(baseCanvas, 0, 0);
+  morphPoints.forEach((p, i) => {
+    const x = side === 'a' ? p.ax : p.bx;
+    const y = side === 'a' ? p.ay : p.by;
+    const selected = i === morphSelectedIndex;
+    ctx.beginPath();
+    ctx.arc(x, y, selected ? 9 : 7, 0, Math.PI * 2);
+    ctx.fillStyle = p.locked ? 'rgba(160,160,160,0.85)' : (selected ? '#ffffff' : '#4f8cff');
+    ctx.fill();
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = selected ? '#4f8cff' : 'rgba(0,0,0,0.5)';
+    ctx.stroke();
+  });
+}
+
+function morphCanvasCoords(canvas, evt) {
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = canvas.width / rect.width;
+  const scaleY = canvas.height / rect.height;
+  return {
+    x: Math.max(0, Math.min(canvas.width, (evt.clientX - rect.left) * scaleX)),
+    y: Math.max(0, Math.min(canvas.height, (evt.clientY - rect.top) * scaleY))
+  };
+}
+
+function hitTestMorphPoint(side, x, y) {
+  const threshold = 16; // canvas px
+  let best = -1;
+  let bestDist = threshold;
+  morphPoints.forEach((p, i) => {
+    const px = side === 'a' ? p.ax : p.bx;
+    const py = side === 'a' ? p.ay : p.by;
+    const dist = Math.hypot(px - x, py - y);
+    if (dist < bestDist) { bestDist = dist; best = i; }
+  });
+  return best;
+}
+
+function setupMorphCanvasInteraction(canvas, side) {
+  canvas.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    const { x, y } = morphCanvasCoords(canvas, e);
+    const hit = hitTestMorphPoint(side, x, y);
+
+    if (hit !== -1 && morphPoints[hit].locked) {
+      return; // locked corners can't be selected, moved, or deleted
+    }
+    if (hit !== -1) {
+      morphSelectedIndex = hit;
+      morphDrag = { index: hit, side };
+    } else {
+      morphPoints.push({ ax: x, ay: y, bx: x, by: y, locked: false });
+      morphSelectedIndex = morphPoints.length - 1;
+      morphDrag = { index: morphSelectedIndex, side };
+    }
+    canvas.setPointerCapture(e.pointerId);
+    renderMorphEditorCanvases();
+  });
+
+  canvas.addEventListener('pointermove', (e) => {
+    if (!morphDrag || morphDrag.side !== side) return;
+    const { x, y } = morphCanvasCoords(canvas, e);
+    const p = morphPoints[morphDrag.index];
+    if (side === 'a') { p.ax = x; p.ay = y; } else { p.bx = x; p.by = y; }
+    renderMorphEditorCanvases();
+  });
+
+  function endDrag() {
+    if (morphDrag && morphDrag.side === side) morphDrag = null;
+  }
+  canvas.addEventListener('pointerup', endDrag);
+  canvas.addEventListener('pointercancel', endDrag);
+}
+setupMorphCanvasInteraction(morphCanvasA, 'a');
+setupMorphCanvasInteraction(morphCanvasB, 'b');
+
+morphDeletePointBtn.addEventListener('click', () => {
+  if (morphSelectedIndex === -1) return;
+  morphPoints.splice(morphSelectedIndex, 1);
+  morphSelectedIndex = -1;
+  renderMorphEditorCanvases();
+});
+
+morphResetPointsBtn.addEventListener('click', () => {
+  if (morphPoints.length <= 4) return;
+  if (!confirm('Remove all added points (keeping just the 4 locked corners)?')) return;
+  morphPoints = initMorphPoints(morphCanvasA.width, morphCanvasA.height);
+  morphSelectedIndex = -1;
+  renderMorphEditorCanvases();
+});
+
+// ---------- Delaunay triangulation (Bowyer–Watson) ----------
+// Returns a list of [i, j, k] index triples into `points`.
+function delaunayTriangulate(points) {
+  const n = points.length;
+  if (n < 3) return [];
+
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const p of points) {
+    minX = Math.min(minX, p.x); minY = Math.min(minY, p.y);
+    maxX = Math.max(maxX, p.x); maxY = Math.max(maxY, p.y);
+  }
+  const deltaMax = Math.max(maxX - minX, maxY - minY, 1) * 10;
+  const midX = (minX + maxX) / 2;
+  const midY = (minY + maxY) / 2;
+
+  // A super-triangle big enough to contain every point, removed at the end.
+  const pts = points.concat([
+    { x: midX - deltaMax, y: midY - deltaMax },
+    { x: midX, y: midY + deltaMax },
+    { x: midX + deltaMax, y: midY - deltaMax }
+  ]);
+  const superIdx = [n, n + 1, n + 2];
+
+  // Standard Guibas–Stolfi in-circle predicate, orientation-aware so it
+  // works regardless of each triangle's vertex winding order.
+  function circumcircleContains(tri, p) {
+    const [A, B, C] = tri.map(i => pts[i]);
+    const ax = A.x - p.x, ay = A.y - p.y;
+    const bx = B.x - p.x, by = B.y - p.y;
+    const cx = C.x - p.x, cy = C.y - p.y;
+
+    const det =
+      (ax * ax + ay * ay) * (bx * cy - by * cx) -
+      (bx * bx + by * by) * (ax * cy - ay * cx) +
+      (cx * cx + cy * cy) * (ax * by - ay * bx);
+
+    const orient = (B.x - A.x) * (C.y - A.y) - (C.x - A.x) * (B.y - A.y);
+    return orient > 0 ? det > 1e-9 : det < -1e-9;
+  }
+
+  function edgeKey(a, b) { return a < b ? a + '_' + b : b + '_' + a; }
+
+  let triangles = [[...superIdx]];
+
+  for (let pi = 0; pi < n; pi++) {
+    const badTriangles = triangles.filter(tri => circumcircleContains(tri, pts[pi]));
+
+    const edgeCount = new Map();
+    for (const tri of badTriangles) {
+      const edges = [[tri[0], tri[1]], [tri[1], tri[2]], [tri[2], tri[0]]];
+      for (const [a, b] of edges) {
+        const key = edgeKey(a, b);
+        edgeCount.set(key, (edgeCount.get(key) || 0) + 1);
+      }
+    }
+    const boundary = [];
+    for (const tri of badTriangles) {
+      const edges = [[tri[0], tri[1]], [tri[1], tri[2]], [tri[2], tri[0]]];
+      for (const [a, b] of edges) {
+        if (edgeCount.get(edgeKey(a, b)) === 1) boundary.push([a, b]);
+      }
+    }
+
+    triangles = triangles.filter(tri => !badTriangles.includes(tri));
+    for (const [a, b] of boundary) {
+      triangles.push([a, b, pi]);
+    }
+  }
+
+  return triangles.filter(tri => !tri.some(i => superIdx.includes(i)));
+}
+
+// ---------- Per-triangle affine warp ----------
+// 3x3 determinant via cofactor expansion along the first row.
+function det3(m) {
+  return (
+    m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1]) -
+    m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0]) +
+    m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0])
+  );
+}
+
+// Solves P * [x,y,e]^T = rhs for one axis via Cramer's rule, where P's rows
+// are [srcX, srcY, 1] for each of the 3 triangle corners.
+function solveAffineAxis(P, rhs) {
+  const D = det3(P);
+  if (Math.abs(D) < 1e-10) return null;
+  const Pa = [[rhs[0], P[0][1], P[0][2]], [rhs[1], P[1][1], P[1][2]], [rhs[2], P[2][1], P[2][2]]];
+  const Pc = [[P[0][0], rhs[0], P[0][2]], [P[1][0], rhs[1], P[1][2]], [P[2][0], rhs[2], P[2][2]]];
+  const Pe = [[P[0][0], P[0][1], rhs[0]], [P[1][0], P[1][1], rhs[1]], [P[2][0], P[2][1], rhs[2]]];
+  return [det3(Pa) / D, det3(Pc) / D, det3(Pe) / D];
+}
+
+// Finds the affine matrix {a,b,c,d,e,f} mapping src triangle -> dst triangle,
+// for use with ctx.transform(a,b,c,d,e,f).
+function computeAffine(src, dst) {
+  const P = [
+    [src[0].x, src[0].y, 1],
+    [src[1].x, src[1].y, 1],
+    [src[2].x, src[2].y, 1]
+  ];
+  const sol1 = solveAffineAxis(P, [dst[0].x, dst[1].x, dst[2].x]);
+  if (!sol1) return null;
+  const sol2 = solveAffineAxis(P, [dst[0].y, dst[1].y, dst[2].y]);
+  if (!sol2) return null;
+  return { a: sol1[0], c: sol1[1], e: sol1[2], b: sol2[0], d: sol2[1], f: sol2[2] };
+}
+
+function drawWarpedTriangle(ctx, image, srcTri, dstTri) {
+  const m = computeAffine(srcTri, dstTri);
+  if (!m) return;
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(dstTri[0].x, dstTri[0].y);
+  ctx.lineTo(dstTri[1].x, dstTri[1].y);
+  ctx.lineTo(dstTri[2].x, dstTri[2].y);
+  ctx.closePath();
+  ctx.clip();
+  ctx.transform(m.a, m.b, m.c, m.d, m.e, m.f);
+  ctx.drawImage(image, 0, 0);
+  ctx.restore();
+}
+
+// Cosine-based ease-in-out: starts and ends the morph gently.
+function easeInOut(t) {
+  return (1 - Math.cos(Math.PI * t)) / 2;
+}
+
+function renderMorphFrame(t, triangles, ptsA, ptsB, canvasA, canvasB, outW, outH) {
+  const interp = ptsA.map((pa, i) => {
+    const pb = ptsB[i];
+    return { x: pa.x + (pb.x - pa.x) * t, y: pa.y + (pb.y - pa.y) * t };
+  });
+
+  const layerA = document.createElement('canvas');
+  layerA.width = outW;
+  layerA.height = outH;
+  const ctxA = layerA.getContext('2d');
+  for (const tri of triangles) {
+    drawWarpedTriangle(ctxA, canvasA, tri.map(i => ptsA[i]), tri.map(i => interp[i]));
+  }
+
+  const layerB = document.createElement('canvas');
+  layerB.width = outW;
+  layerB.height = outH;
+  const ctxB = layerB.getContext('2d');
+  for (const tri of triangles) {
+    drawWarpedTriangle(ctxB, canvasB, tri.map(i => ptsB[i]), tri.map(i => interp[i]));
+  }
+
+  const out = document.createElement('canvas');
+  out.width = outW;
+  out.height = outH;
+  const ctx = out.getContext('2d');
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, outW, outH);
+  ctx.globalAlpha = 1 - t;
+  ctx.drawImage(layerA, 0, 0);
+  ctx.globalAlpha = t;
+  ctx.drawImage(layerB, 0, 0);
+  ctx.globalAlpha = 1;
+
+  return out;
+}
+
+morphCreateBtn.addEventListener('click', createMorphFrames);
+
+async function createMorphFrames() {
+  const steps = Math.max(2, Math.min(60, parseInt(morphStepsInput.value) || 10));
+  const outW = morphCanvasA.width;
+  const outH = morphCanvasA.height;
+
+  const ptsA = morphPoints.map(p => ({ x: p.ax, y: p.ay }));
+  const ptsB = morphPoints.map(p => ({ x: p.bx, y: p.by }));
+  const midPts = morphPoints.map(p => ({ x: (p.ax + p.bx) / 2, y: (p.ay + p.by) / 2 }));
+  const triangles = delaunayTriangulate(midPts);
+
+  if (triangles.length === 0) {
+    alert('Could not triangulate these points — try moving a point so it is not exactly on a straight line with the others.');
+    return;
+  }
+
+  morphCreateBtn.disabled = true;
+  morphProgress.hidden = false;
+
+  const duration = parseInt(frameDurationInput.value) || 200;
+  const totalFrames = steps + 2; // includes the start (t=0) and end (t=1) frames
+  const newFrames = [];
+
+  for (let i = 0; i < totalFrames; i++) {
+    morphProgress.textContent = `Rendering morph frame ${i + 1} of ${totalFrames}…`;
+    // Yield a tick so the progress text and the rest of the page stay
+    // responsive between frames — each frame's warp rendering is
+    // synchronous canvas work that would otherwise block the UI thread.
+    await new Promise(resolve => setTimeout(resolve, 0));
+
+    const t = easeInOut(i / (totalFrames - 1));
+    const frameCanvas = renderMorphFrame(t, triangles, ptsA, ptsB, morphImgA.canvas, morphImgB.canvas, outW, outH);
+    newFrames.push(frameCanvas);
+  }
+
+  newFrames.forEach(canvas => pushFrame(canvas, duration));
+  renderFrames();
+
+  morphProgress.hidden = true;
+  morphCreateBtn.disabled = false;
+  closeMorphEditor();
 }
 
 // ---------- PWA: offline install + stale-while-revalidate caching ----------
