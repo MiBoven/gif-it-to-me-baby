@@ -248,3 +248,12 @@ footer { text-align: center; color: var(--text-secondary); font-size: 12px; marg
 .morph-canvas-wrap canvas { display: block; width: 100%; height: auto; touch-action: none; cursor: crosshair; }
 
 .morph-point-toolbar { justify-content: flex-end; margin: 10px 0; }
+
+/* ---------- Morph editor: mode toggle, preview, actions ---------- */
+.segmented { display: flex; gap: 0; margin-bottom: 12px; border: 1px solid var(--accent); border-radius: 10px; overflow: hidden; }
+.seg-btn { flex: 1; padding: 10px 8px; border: 0; background: transparent; color: var(--accent); font: inherit; cursor: pointer; }
+.seg-btn.active { background: var(--accent); color: var(--accent-text); }
+.morph-preview-box { margin: 12px 0; text-align: center; }
+.morph-preview-box canvas { max-width: 100%; height: auto; border: 1px solid var(--border); border-radius: 8px; }
+.morph-actions { gap: 10px; }
+.morph-actions .secondary-btn, .morph-actions .primary-btn { flex: 1; margin: 0; }

@@ -441,12 +441,21 @@ const morphStepsInput = document.getElementById('morphSteps');
 const morphProgress = document.getElementById('morphProgress');
 const morphCreateBtn = document.getElementById('morphCreateBtn');
 const morphResDisplay = document.getElementById('morphResDisplay');
+const morphModeWarp = document.getElementById('morphModeWarp');
+const morphModeFade = document.getElementById('morphModeFade');
+const morphPointsArea = document.getElementById('morphPointsArea');
+const morphFadeHint = document.getElementById('morphFadeHint');
+const morphPreviewBtn = document.getElementById('morphPreviewBtn');
+const morphPreviewBox = document.getElementById('morphPreviewBox');
+const morphPreviewCanvas = document.getElementById('morphPreviewCanvas');
 
 let morphImgA = null;   // { canvas } — pristine, fitted to outW×outH, never drawn on
 let morphImgB = null;
 let morphPoints = [];   // [{ ax, ay, bx, by, locked }] — index pairs A/B positions
 let morphSelectedIndex = -1;
 let morphDrag = null;   // { index, side }
+let morphMode = 'warp';  // 'warp' (control points) or 'fade' (plain crossfade)
+let morphPlayTimer = null;
 let morphPreviewUrlA = null;
 let morphPreviewUrlB = null;
 
@@ -456,6 +465,7 @@ morphOpenBtn.addEventListener('click', () => {
   morphPoints = [];
   morphSelectedIndex = -1;
   morphDrag = null;
+  setMorphMode('warp');
 
   [morphSlotA, morphSlotB].forEach(slot => slot.classList.remove('filled'));
   [morphPreviewA, morphPreviewB].forEach(img => { img.hidden = true; });
@@ -473,7 +483,24 @@ morphOpenBtn.addEventListener('click', () => {
 });
 
 function closeMorphEditor() {
+  stopMorphPreview();
   morphBg.hidden = true;
+}
+
+function setMorphMode(mode) {
+  morphMode = mode;
+  stopMorphPreview();
+  morphModeWarp.classList.toggle('active', mode === 'warp');
+  morphModeFade.classList.toggle('active', mode === 'fade');
+  morphPointsArea.hidden = mode !== 'warp';
+  morphFadeHint.hidden = mode !== 'fade';
+}
+morphModeWarp.addEventListener('click', () => setMorphMode('warp'));
+morphModeFade.addEventListener('click', () => setMorphMode('fade'));
+
+function stopMorphPreview() {
+  if (morphPlayTimer) { clearInterval(morphPlayTimer); morphPlayTimer = null; }
+  morphPreviewBtn.textContent = '▶ Preview';
 }
 morphCloseBtn.addEventListener('click', closeMorphEditor);
 morphBg.addEventListener('click', (e) => { if (e.target === morphBg) closeMorphEditor(); });
@@ -810,47 +837,97 @@ function renderMorphFrame(t, triangles, ptsA, ptsB, canvasA, canvasB, outW, outH
   return out;
 }
 
-morphCreateBtn.addEventListener('click', createMorphFrames);
+// Plain crossfade: no warping, just blend start into end.
+function renderFadeFrame(t, canvasA, canvasB, outW, outH) {
+  const out = document.createElement('canvas');
+  out.width = outW;
+  out.height = outH;
+  const ctx = out.getContext('2d');
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, outW, outH);
+  ctx.globalAlpha = 1 - t;
+  ctx.drawImage(canvasA, 0, 0);
+  ctx.globalAlpha = t;
+  ctx.drawImage(canvasB, 0, 0);
+  ctx.globalAlpha = 1;
+  return out;
+}
 
-async function createMorphFrames() {
+// Builds all frames for the current mode. Returns null if it can't (bad triangulation).
+async function buildMorphFrames() {
   const steps = Math.max(2, Math.min(60, parseInt(morphStepsInput.value) || 10));
   const outW = morphCanvasA.width;
   const outH = morphCanvasA.height;
 
-  const ptsA = morphPoints.map(p => ({ x: p.ax, y: p.ay }));
-  const ptsB = morphPoints.map(p => ({ x: p.bx, y: p.by }));
-  const midPts = morphPoints.map(p => ({ x: (p.ax + p.bx) / 2, y: (p.ay + p.by) / 2 }));
-  const triangles = delaunayTriangulate(midPts);
-
-  if (triangles.length === 0) {
-    alert('Could not triangulate these points — try moving a point so it is not exactly on a straight line with the others.');
-    return;
+  let ptsA, ptsB, triangles;
+  if (morphMode === 'warp') {
+    ptsA = morphPoints.map(p => ({ x: p.ax, y: p.ay }));
+    ptsB = morphPoints.map(p => ({ x: p.bx, y: p.by }));
+    const midPts = morphPoints.map(p => ({ x: (p.ax + p.bx) / 2, y: (p.ay + p.by) / 2 }));
+    triangles = delaunayTriangulate(midPts);
+    if (triangles.length === 0) {
+      alert('Could not triangulate these points — try moving a point so it is not exactly on a straight line with the others.');
+      return null;
+    }
   }
 
+  const totalFrames = steps + 2; // includes the start (t=0) and end (t=1) frames
+  const frames = [];
+  for (let i = 0; i < totalFrames; i++) {
+    morphProgress.textContent = `Rendering frame ${i + 1} of ${totalFrames}…`;
+    // Yield a tick so the UI stays responsive between synchronous canvas renders.
+    await new Promise(resolve => setTimeout(resolve, 0));
+    const t = easeInOut(i / (totalFrames - 1));
+    frames.push(morphMode === 'warp'
+      ? renderMorphFrame(t, triangles, ptsA, ptsB, morphImgA.canvas, morphImgB.canvas, outW, outH)
+      : renderFadeFrame(t, morphImgA.canvas, morphImgB.canvas, outW, outH));
+  }
+  return frames;
+}
+
+morphPreviewBtn.addEventListener('click', async () => {
+  if (morphPlayTimer) { stopMorphPreview(); return; }
+  morphPreviewBtn.disabled = true;
   morphCreateBtn.disabled = true;
   morphProgress.hidden = false;
+  const frames = await buildMorphFrames();
+  morphProgress.hidden = true;
+  morphPreviewBtn.disabled = false;
+  morphCreateBtn.disabled = false;
+  if (!frames) return;
 
-  const duration = parseInt(frameDurationInput.value) || 200;
-  const totalFrames = steps + 2; // includes the start (t=0) and end (t=1) frames
-  const newFrames = [];
+  morphPreviewCanvas.width = frames[0].width;
+  morphPreviewCanvas.height = frames[0].height;
+  morphPreviewBox.hidden = false;
+  const pctx = morphPreviewCanvas.getContext('2d');
+  const duration = Math.max(20, parseInt(frameDurationInput.value) || 200);
+  let i = 0, dir = 1; // ping-pong so the loop doesn't jump from end back to start
+  morphPreviewBtn.textContent = '■ Stop';
+  morphPlayTimer = setInterval(() => {
+    pctx.drawImage(frames[i], 0, 0);
+    if (i + dir < 0 || i + dir >= frames.length) dir = -dir;
+    i += dir;
+  }, duration);
+});
 
-  for (let i = 0; i < totalFrames; i++) {
-    morphProgress.textContent = `Rendering morph frame ${i + 1} of ${totalFrames}…`;
-    // Yield a tick so the progress text and the rest of the page stay
-    // responsive between frames — each frame's warp rendering is
-    // synchronous canvas work that would otherwise block the UI thread.
-    await new Promise(resolve => setTimeout(resolve, 0));
+morphCreateBtn.addEventListener('click', createMorphFrames);
 
-    const t = easeInOut(i / (totalFrames - 1));
-    const frameCanvas = renderMorphFrame(t, triangles, ptsA, ptsB, morphImgA.canvas, morphImgB.canvas, outW, outH);
-    newFrames.push(frameCanvas);
-  }
+async function createMorphFrames() {
+  stopMorphPreview();
+  morphCreateBtn.disabled = true;
+  morphPreviewBtn.disabled = true;
+  morphProgress.hidden = false;
 
-  newFrames.forEach(canvas => pushFrame(canvas, duration));
-  renderFrames();
+  const frames = await buildMorphFrames();
 
   morphProgress.hidden = true;
   morphCreateBtn.disabled = false;
+  morphPreviewBtn.disabled = false;
+  if (!frames) return;
+
+  const duration = parseInt(frameDurationInput.value) || 200;
+  frames.forEach(canvas => pushFrame(canvas, duration));
+  renderFrames();
   closeMorphEditor();
 }
 

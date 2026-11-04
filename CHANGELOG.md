@@ -2,6 +2,12 @@
 
 All notable changes to GIF it to me Baby are documented here.
 
+## 0.4.0 — 2026-11-04 — Fade option & preview
+
+- The morph tool now offers a **Fade (crossfade)** mode next to **Morph (control points)**, switchable after picking both images; fade needs no point placement
+- New **Preview** button plays the generated transition as a looping (ping-pong) animation inside the editor before you add the frames to the list
+- Button renamed to "Morph or fade two images…"
+
 ## 0.3.0 — 2026-10-31 — Image morphing
 
 - New **"Morph two images…"** tool: pick a start and an end image, place matching pairs of points on the features you want to track (the four image corners are locked in automatically), and generate a smooth warp-morph between them as a sequence of GIF frames, appended to the current frame list
