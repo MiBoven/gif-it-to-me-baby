@@ -64,15 +64,55 @@
   <p class="field-hint">Applies to newly added frames. Each frame can be overridden individually below.</p>
 </div>
 
-<div class="card">
+<div class="card" id="canvasCard">
+  <h2 class="card-title">Canvas</h2>
+  <div class="row">
+    <label class="label-main">Format</label>
+    <select id="formatSelect">
+      <option value="first" selected>Like first frame</option>
+      <option value="16:9">16:9 · landscape</option>
+      <option value="9:16">9:16 · portrait</option>
+      <option value="1:1">1:1 · square</option>
+      <option value="4:5">4:5 · portrait (Instagram)</option>
+      <option value="4:3">4:3</option>
+      <option value="3:4">3:4</option>
+      <option value="21:9">21:9 · cinema</option>
+      <option value="custom">Custom…</option>
+    </select>
+  </div>
+  <div class="row" id="customFormatRow" hidden>
+    <label class="label-main">Ratio</label>
+    <input type="number" id="customRatioW" min="1" value="3" class="dim-input">
+    <span class="unit">:</span>
+    <input type="number" id="customRatioH" min="1" value="2" class="dim-input">
+  </div>
   <div class="row">
     <label class="label-main">Resolution</label>
-    <input type="number" id="outWidth" min="1" value="480" class="dim-input">
-    <span class="unit">×</span>
-    <input type="number" id="outHeight" min="1" value="480" class="dim-input">
+    <select id="resolutionSelect">
+      <option value="original">Original (max.)</option>
+      <option value="1080">1080p</option>
+      <option value="720" selected>720p</option>
+      <option value="480">480p</option>
+      <option value="360">360p</option>
+      <option value="240">240p</option>
+      <option value="120">120p</option>
+      <option value="custom">Custom…</option>
+    </select>
+  </div>
+  <div class="row" id="customResRow" hidden>
+    <label class="label-main">Short side</label>
+    <input type="number" id="customResValue" min="16" max="4096" value="480" class="dim-input">
     <span class="unit">px</span>
   </div>
-  <p class="field-hint">Frames are scaled to fit proportionally (padded with white if the aspect ratio doesn't match). Auto-filled from the first frame you add.</p>
+  <div class="row">
+    <label class="label-main">Background</label>
+    <div class="segmented inline" role="group" aria-label="Background type">
+      <button type="button" class="seg-btn active" id="bgModeColor">Color</button>
+      <button type="button" class="seg-btn" id="bgModeBlur">Blur</button>
+    </div>
+    <input type="color" id="bgColor" value="#ffffff" title="Background color">
+  </div>
+  <p class="field-hint">Resolution refers to the short side (720p of 9:16 = 720×1280). Frames are fit into the format; use the ✂ button on a frame to crop or zoom it. The background fills any empty space. <strong id="canvasInfo"></strong></p>
 </div>
 
 <div class="card">
@@ -122,9 +162,34 @@
   <a id="resultDl" class="dl-full">Download</a>
 </div>
 
-<footer>GIF it to me Baby · v0.4.0</footer>
+<footer>GIF it to me Baby · v0.5.0</footer>
 
 <!-- ---------- Morph editor (full-screen) ---------- -->
+<!-- ---------- Crop & position editor ---------- -->
+<div class="morph-bg" id="cropBg" hidden>
+  <div class="morph-panel">
+    <div class="morph-header">
+      <h2>Crop &amp; position</h2>
+      <button class="icon" id="cropCloseBtn" title="Close">✕</button>
+    </div>
+    <p class="field-hint">Drag the image to move it, use the slider to zoom. Empty areas are filled with the background.</p>
+    <div class="crop-stage"><canvas id="cropCanvas"></canvas></div>
+    <div class="card">
+      <div class="row">
+        <label class="label-main">Zoom</label>
+        <input type="range" id="cropZoom" min="1" max="10" step="0.01" value="1">
+      </div>
+    </div>
+    <div class="row crop-actions">
+      <button type="button" class="secondary-btn" id="cropFitBtn">Fit</button>
+      <button type="button" class="secondary-btn" id="cropFillBtn">Fill</button>
+      <button type="button" class="secondary-btn" id="cropResetBtn">Reset</button>
+    </div>
+    <button type="button" class="secondary-btn crop-apply" id="cropApplyAllBtn">Apply to all frames</button>
+    <button type="button" class="primary-btn" id="cropDoneBtn">Done</button>
+  </div>
+</div>
+
 <div class="morph-bg" id="morphBg" hidden>
   <div class="morph-panel">
     <div class="morph-header">
@@ -133,7 +198,7 @@
     </div>
 
     <div id="morphUploadStep">
-      <p class="field-hint">Pick a start image and an end image. Both are fit to the current Resolution setting (<span id="morphResDisplay"></span>) — cancel and adjust it first if you want a different size.</p>
+      <p class="field-hint">Pick a start image and an end image. Both use the Canvas settings of the main page — Format and Resolution (currently <span id="morphResDisplay"></span>), plus Background. Cancel and adjust them first for a different size; choose “Original (max.)” to keep the full image resolution.</p>
       <div class="morph-upload-row">
         <div class="morph-upload-slot" id="morphSlotA">
           <input type="file" id="morphFileA" accept="image/*" hidden>
@@ -153,6 +218,7 @@
         <button type="button" class="seg-btn active" id="morphModeWarp">Morph (control points)</button>
         <button type="button" class="seg-btn" id="morphModeFade">Fade (crossfade)</button>
       </div>
+      <p class="field-hint" id="morphSizeHint" hidden></p>
       <div id="morphPointsArea">
       <p class="field-hint">Tap anywhere on either image to add a matching pair of points, then drag each half into place over the same feature. The four corners are locked and always match. <span id="morphPointCount"></span></p>
       <div class="morph-canvases">
@@ -207,7 +273,7 @@
   <div class="modal">
     <img src="icons/logo.png" class="about-logo" alt="">
     <h2>GIF it to me Baby</h2>
-    <p class="version-line">Version 0.4.0</p>
+    <p class="version-line">Version 0.5.0</p>
     <p>Turns images into an animated GIF, or edits an existing one — entirely in your browser. 100% client-side: no backend, no analytics, no image ever leaves your device.</p>
     <p class="credits">
       Built with <a href="https://github.com/jnordberg/gif.js" target="_blank" rel="noopener">gif.js</a>

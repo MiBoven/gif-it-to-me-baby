@@ -257,3 +257,14 @@ footer { text-align: center; color: var(--text-secondary); font-size: 12px; marg
 .morph-preview-box canvas { max-width: 100%; height: auto; border: 1px solid var(--border); border-radius: 8px; }
 .morph-actions { gap: 10px; }
 .morph-actions .secondary-btn, .morph-actions .primary-btn { flex: 1; margin: 0; }
+
+/* ---------- Canvas card & crop editor ---------- */
+.card-title { font-size: 15px; margin: 0 0 12px; }
+.segmented.inline { margin: 0; flex: 1; }
+input[type="color"] { width: 44px; height: 38px; padding: 2px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2); cursor: pointer; }
+.crop-stage { display: flex; justify-content: center; margin: 12px 0; }
+.crop-stage canvas { max-width: 100%; max-height: 55vh; touch-action: none; cursor: grab; border: 1px solid var(--border); border-radius: 8px; }
+.crop-actions { gap: 8px; margin: 10px 0; }
+.crop-actions .secondary-btn { flex: 1; margin: 0; }
+.crop-apply { margin-bottom: 10px; }
+.item button.crop-btn { flex-shrink: 0; }

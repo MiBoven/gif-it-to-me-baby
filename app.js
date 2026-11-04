@@ -71,8 +71,6 @@ document.getElementById('resetPrefsBtn').addEventListener('click', () => {
 const drop = document.getElementById('drop');
 const fileInput = document.getElementById('fileInput');
 const frameDurationInput = document.getElementById('frameDuration');
-const outWidthInput = document.getElementById('outWidth');
-const outHeightInput = document.getElementById('outHeight');
 const qualityRange = document.getElementById('quality');
 const qualityLabel = document.getElementById('qualityLabel');
 const colorsSelect = document.getElementById('colors');
@@ -86,9 +84,8 @@ const resultImg = document.getElementById('resultImg');
 const resultInfo = document.getElementById('resultInfo');
 const resultDl = document.getElementById('resultDl');
 
-let frames = [];       // { id, canvas, duration }
+let frames = [];       // { id, canvas, duration, crop: { zoom, cx, cy } }
 let frameCounter = 0;
-let dimsUserEdited = false;
 
 // Warn before an accidental reload/navigation throws away unsaved progress.
 window.addEventListener('beforeunload', (e) => {
@@ -101,8 +98,137 @@ window.addEventListener('beforeunload', (e) => {
 qualityRange.addEventListener('input', () => {
   qualityLabel.textContent = qualityRange.value;
 });
-outWidthInput.addEventListener('input', () => { dimsUserEdited = true; });
-outHeightInput.addEventListener('input', () => { dimsUserEdited = true; });
+
+// ---------- Canvas: format, resolution, background ----------
+const formatSelect = document.getElementById('formatSelect');
+const customFormatRow = document.getElementById('customFormatRow');
+const customRatioW = document.getElementById('customRatioW');
+const customRatioH = document.getElementById('customRatioH');
+const resolutionSelect = document.getElementById('resolutionSelect');
+const customResRow = document.getElementById('customResRow');
+const customResValue = document.getElementById('customResValue');
+const bgColorInput = document.getElementById('bgColor');
+const bgModeColor = document.getElementById('bgModeColor');
+const bgModeBlur = document.getElementById('bgModeBlur');
+const canvasInfo = document.getElementById('canvasInfo');
+
+let bgMode = 'color';              // 'color' | 'blur'
+const MAX_SIDE = 4096;             // hard cap on the longer output side
+const FORMAT_RATIOS = { '16:9': 16 / 9, '9:16': 9 / 16, '1:1': 1, '4:5': 4 / 5, '4:3': 4 / 3, '3:4': 3 / 4, '21:9': 21 / 9 };
+
+// `extra` = additional source sizes (anything with width/height) that aren't
+// in the frame list yet, e.g. the two images of the morph tool.
+function getAspect(extra) {
+  const v = formatSelect.value;
+  if (v === 'custom') {
+    const w = parseFloat(customRatioW.value) || 1;
+    const h = parseFloat(customRatioH.value) || 1;
+    return w / h;
+  }
+  if (v === 'first') {
+    const s = frames[0] ? frames[0].canvas : (extra && extra[0]);
+    return s ? s.width / s.height : 1;
+  }
+  return FORMAT_RATIOS[v];
+}
+
+function getOutputSize(extra = []) {
+  const R = getAspect(extra);
+  const res = resolutionSelect.value;
+  let W, H;
+  if (res === 'original') {
+    // Smallest canvas of this format that holds the largest source at native size.
+    const srcs = frames.map(f => f.canvas).concat(extra);
+    let w0 = srcs.length ? 1 : 720 * Math.max(1, R);
+    srcs.forEach(s => { w0 = Math.max(w0, s.width, s.height * R); });
+    W = w0; H = w0 / R;
+  } else {
+    const short = res === 'custom'
+      ? Math.max(16, Math.min(MAX_SIDE, parseInt(customResValue.value) || 480))
+      : parseInt(res);
+    if (R >= 1) { H = short; W = short * R; } else { W = short; H = short / R; }
+  }
+  const longSide = Math.max(W, H);
+  if (longSide > MAX_SIDE) { const k = MAX_SIDE / longSide; W *= k; H *= k; }
+  return { W: Math.max(1, Math.round(W)), H: Math.max(1, Math.round(H)) };
+}
+
+function updateCanvasInfo() {
+  const { W, H } = getOutputSize();
+  canvasInfo.textContent = `Output: ${W}×${H} px`;
+}
+
+function defaultCrop() { return { zoom: 1, cx: 0.5, cy: 0.5 }; }
+
+// Background: a flat color, or a heavily blurred cover-fit copy of the image.
+// The blur is done by shrinking and re-enlarging (works in every browser,
+// unlike ctx.filter which Safari lacks).
+function drawBackground(ctx, src, W, H) {
+  if (bgMode === 'blur') {
+    const tw = Math.max(2, Math.round(W / 24));
+    const th = Math.max(2, Math.round(H / 24));
+    const tiny = document.createElement('canvas');
+    tiny.width = tw; tiny.height = th;
+    const tctx = tiny.getContext('2d');
+    const k = Math.max(tw / src.width, th / src.height);
+    const bw = src.width * k, bh = src.height * k;
+    tctx.imageSmoothingQuality = 'high';
+    tctx.drawImage(src, (tw - bw) / 2, (th - bh) / 2, bw, bh);
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(tiny, 0, 0, W, H);
+  } else {
+    ctx.fillStyle = bgColorInput.value;
+    ctx.fillRect(0, 0, W, H);
+  }
+}
+
+// Draws `src` into a W×H area using a frame's crop: zoom 1 = fit entirely
+// inside, cx/cy = which point of the image (0..1) sits at the center.
+// Normalizes crop.cx/cy so the image can't be dragged away from the edges.
+function drawFrameInto(ctx, src, crop, W, H) {
+  const sw = src.width, sh = src.height;
+  const fit = Math.min(W / sw, H / sh);
+  const s = fit * crop.zoom;
+  const dw = sw * s, dh = sh * s;
+  let dx, dy;
+  if (dw > W) {
+    dx = Math.min(0, Math.max(W - dw, W / 2 - crop.cx * dw));
+    crop.cx = (W / 2 - dx) / dw;
+  } else { dx = (W - dw) / 2; crop.cx = 0.5; }
+  if (dh > H) {
+    dy = Math.min(0, Math.max(H - dh, H / 2 - crop.cy * dh));
+    crop.cy = (H / 2 - dy) / dh;
+  } else { dy = (H - dh) / 2; crop.cy = 0.5; }
+
+  if (dw < W - 0.5 || dh < H - 0.5) drawBackground(ctx, src, W, H);
+  ctx.drawImage(src, dx, dy, dw, dh);
+}
+
+function renderFrameTo(f, W, H) {
+  const c = document.createElement('canvas');
+  c.width = W; c.height = H;
+  drawFrameInto(c.getContext('2d'), f.canvas, f.crop, W, H);
+  return c;
+}
+
+formatSelect.addEventListener('change', () => {
+  customFormatRow.hidden = formatSelect.value !== 'custom';
+  renderFrames();
+});
+resolutionSelect.addEventListener('change', () => {
+  customResRow.hidden = resolutionSelect.value !== 'custom';
+  renderFrames();
+});
+[customRatioW, customRatioH, customResValue, bgColorInput].forEach(el => el.addEventListener('input', renderFrames));
+function setBgMode(m) {
+  bgMode = m;
+  bgModeColor.classList.toggle('active', m === 'color');
+  bgModeBlur.classList.toggle('active', m === 'blur');
+  bgColorInput.hidden = m !== 'color';
+  renderFrames();
+}
+bgModeColor.addEventListener('click', () => setBgMode('color'));
+bgModeBlur.addEventListener('click', () => setBgMode('blur'));
 
 // ---------- Drag & drop / file picking ----------
 drop.addEventListener('click', () => fileInput.click());
@@ -147,7 +273,6 @@ async function addImageFrame(file) {
   canvas.height = bitmap.height;
   canvas.getContext('2d').drawImage(bitmap, 0, 0);
   bitmap.close();
-  maybeAutoSetDims(canvas.width, canvas.height);
   pushFrame(canvas, parseInt(frameDurationInput.value) || 200);
 }
 
@@ -169,8 +294,6 @@ async function addGifFrames(file) {
   composite.height = gh;
   const cctx = composite.getContext('2d');
   let savedForRestore = null;
-
-  maybeAutoSetDims(gw, gh);
 
   gifFrames.forEach(frame => {
     if (frame.disposalType === 3) {
@@ -200,30 +323,25 @@ async function addGifFrames(file) {
   });
 }
 
-function maybeAutoSetDims(w, h) {
-  if (frames.length === 0 && !dimsUserEdited) {
-    outWidthInput.value = w;
-    outHeightInput.value = h;
-  }
-}
-
 function pushFrame(canvas, duration) {
-  frames.push({ id: ++frameCounter, canvas, duration });
+  frames.push({ id: ++frameCounter, canvas, duration, crop: defaultCrop() });
 }
 
 // ---------- Frame list UI ----------
 function renderFrames() {
   frameListEl.innerHTML = '';
+  updateCanvasInfo();
+  const outSize = getOutputSize();
+  const outR = outSize.W / outSize.H;
   frames.forEach((f, i) => {
     const row = document.createElement('div');
     row.className = 'item';
 
+    // Thumbnail shows the frame as it will appear in the output (format + crop + background).
     const thumb = document.createElement('canvas');
-    thumb.width = 44; thumb.height = 44;
-    const tctx = thumb.getContext('2d');
-    const scale = Math.min(44 / f.canvas.width, 44 / f.canvas.height);
-    const tw = f.canvas.width * scale, th = f.canvas.height * scale;
-    tctx.drawImage(f.canvas, (44 - tw) / 2, (44 - th) / 2, tw, th);
+    if (outR >= 1.8) { thumb.width = 80; thumb.height = Math.round(80 / outR); }
+    else { thumb.height = 44; thumb.width = Math.max(20, Math.round(44 * outR)); }
+    drawFrameInto(thumb.getContext('2d'), f.canvas, f.crop, thumb.width, thumb.height);
 
     const info = document.createElement('div');
     info.className = 'info';
@@ -245,6 +363,12 @@ function renderFrames() {
     durRow.append(' ms');
     info.appendChild(label);
     info.appendChild(durRow);
+
+    const cropBtn = document.createElement('button');
+    cropBtn.className = 'icon small crop-btn';
+    cropBtn.textContent = '✂';
+    cropBtn.title = 'Crop & position';
+    cropBtn.addEventListener('click', () => openCrop(f));
 
     const upBtn = document.createElement('button');
     upBtn.className = 'icon small';
@@ -269,6 +393,7 @@ function renderFrames() {
 
     row.appendChild(thumb);
     row.appendChild(info);
+    row.appendChild(cropBtn);
     row.appendChild(upBtn);
     row.appendChild(downBtn);
     row.appendChild(remove);
@@ -296,7 +421,6 @@ clearAllBtn.addEventListener('click', () => {
   if (frames.length === 0) return;
   if (!confirm(`Remove all ${frames.length} frames? This can't be undone.`)) return;
   frames = [];
-  dimsUserEdited = false;
   renderFrames();
   resultSection.hidden = true;
 });
@@ -313,20 +437,6 @@ function quantizeImageData(imageData, colors) {
   }
 }
 
-// Scales `drawable` (a canvas, bitmap, or image) proportionally to fit
-// inside outW×outH, padding with white — shared by GIF export and by the
-// morph tool's image loading, so both resize images the same way.
-function drawContainFit(ctx, drawable, srcW, srcH, outW, outH) {
-  ctx.fillStyle = '#ffffff';
-  ctx.fillRect(0, 0, outW, outH);
-  const scale = Math.min(outW / srcW, outH / srcH);
-  const dw = srcW * scale;
-  const dh = srcH * scale;
-  const dx = (outW - dw) / 2;
-  const dy = (outH - dh) / 2;
-  ctx.drawImage(drawable, dx, dy, dw, dh);
-}
-
 // ---------- GIF generation ----------
 generateBtn.addEventListener('click', generateGif);
 
@@ -341,8 +451,7 @@ function generateGif() {
   // must be same-origin, so workerScript points at our own local lib/
   // folder rather than a CDN — this also means rendering needs no network
   // access at all once the page itself has loaded.
-  const outW = parseInt(outWidthInput.value) || 480;
-  const outH = parseInt(outHeightInput.value) || 480;
+  const { W: outW, H: outH } = getOutputSize();
   const colors = parseInt(colorsSelect.value);
   const quality = parseInt(qualityRange.value);
   const repeat = loopCheckbox.checked ? 0 : -1;
@@ -357,11 +466,8 @@ function generateGif() {
   });
 
   frames.forEach(f => {
-    const outCanvas = document.createElement('canvas');
-    outCanvas.width = outW;
-    outCanvas.height = outH;
+    const outCanvas = renderFrameTo(f, outW, outH);
     const ctx = outCanvas.getContext('2d');
-    drawContainFit(ctx, f.canvas, f.canvas.width, f.canvas.height, outW, outH);
     if (colors < 256) {
       const imgData = ctx.getImageData(0, 0, outW, outH);
       quantizeImageData(imgData, colors);
@@ -402,6 +508,92 @@ function showResult(blob) {
   resultSection.hidden = false;
   resultSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
+
+// ============================================================
+// Crop & position editor (per frame, with "apply to all")
+// ============================================================
+const cropBg = document.getElementById('cropBg');
+const cropCanvas = document.getElementById('cropCanvas');
+const cropZoom = document.getElementById('cropZoom');
+let cropFrame = null;
+let cropDrag = null;
+
+function openCrop(f) {
+  cropFrame = f;
+  const { W, H } = getOutputSize();
+  const k = Math.min(1, 600 / Math.max(W, H));
+  cropCanvas.width = Math.max(1, Math.round(W * k));
+  cropCanvas.height = Math.max(1, Math.round(H * k));
+  cropZoom.value = f.crop.zoom;
+  drawCrop();
+  cropBg.hidden = false;
+}
+function drawCrop() {
+  if (!cropFrame) return;
+  const ctx = cropCanvas.getContext('2d');
+  ctx.clearRect(0, 0, cropCanvas.width, cropCanvas.height);
+  drawFrameInto(ctx, cropFrame.canvas, cropFrame.crop, cropCanvas.width, cropCanvas.height);
+}
+function closeCrop() {
+  cropBg.hidden = true;
+  cropFrame = null;
+  renderFrames();
+}
+function cropFillZoom() {
+  const W = cropCanvas.width, H = cropCanvas.height;
+  const sw = cropFrame.canvas.width, sh = cropFrame.canvas.height;
+  const fit = Math.min(W / sw, H / sh);
+  return Math.min(10, Math.max(W / sw, H / sh) / fit);
+}
+function setCrop(zoom) {
+  cropFrame.crop = { zoom, cx: 0.5, cy: 0.5 };
+  cropZoom.value = zoom;
+  drawCrop();
+}
+document.getElementById('cropCloseBtn').addEventListener('click', closeCrop);
+document.getElementById('cropDoneBtn').addEventListener('click', closeCrop);
+cropBg.addEventListener('click', (e) => { if (e.target === cropBg) closeCrop(); });
+document.getElementById('cropFitBtn').addEventListener('click', () => setCrop(1));
+document.getElementById('cropResetBtn').addEventListener('click', () => setCrop(1));
+document.getElementById('cropFillBtn').addEventListener('click', () => setCrop(cropFillZoom()));
+document.getElementById('cropApplyAllBtn').addEventListener('click', () => {
+  frames.forEach(fr => { fr.crop = { ...cropFrame.crop }; });
+  const btn = document.getElementById('cropApplyAllBtn');
+  btn.textContent = 'Applied to all ✓';
+  setTimeout(() => { btn.textContent = 'Apply to all frames'; }, 1500);
+});
+cropZoom.addEventListener('input', () => {
+  if (!cropFrame) return;
+  cropFrame.crop.zoom = parseFloat(cropZoom.value) || 1;
+  drawCrop();
+});
+cropCanvas.addEventListener('pointerdown', (e) => {
+  if (!cropFrame) return;
+  e.preventDefault();
+  cropCanvas.setPointerCapture(e.pointerId);
+  cropDrag = { x: e.clientX, y: e.clientY, cx: cropFrame.crop.cx, cy: cropFrame.crop.cy };
+});
+cropCanvas.addEventListener('pointermove', (e) => {
+  if (!cropDrag || !cropFrame) return;
+  const rect = cropCanvas.getBoundingClientRect();
+  const kx = cropCanvas.width / rect.width;
+  const ky = cropCanvas.height / rect.height;
+  const W = cropCanvas.width, H = cropCanvas.height;
+  const sw = cropFrame.canvas.width, sh = cropFrame.canvas.height;
+  const s = Math.min(W / sw, H / sh) * cropFrame.crop.zoom;
+  cropFrame.crop.cx = cropDrag.cx - ((e.clientX - cropDrag.x) * kx) / (sw * s);
+  cropFrame.crop.cy = cropDrag.cy - ((e.clientY - cropDrag.y) * ky) / (sh * s);
+  drawCrop();
+});
+['pointerup', 'pointercancel'].forEach(ev => cropCanvas.addEventListener(ev, () => { cropDrag = null; }));
+cropCanvas.addEventListener('wheel', (e) => {
+  if (!cropFrame) return;
+  e.preventDefault();
+  const z = Math.max(1, Math.min(10, cropFrame.crop.zoom * (e.deltaY < 0 ? 1.08 : 1 / 1.08)));
+  cropFrame.crop.zoom = z;
+  cropZoom.value = z;
+  drawCrop();
+}, { passive: false });
 
 // ============================================================
 // Morph: warp-morph two images into a sequence of in-between frames
@@ -451,6 +643,8 @@ const morphPreviewCanvas = document.getElementById('morphPreviewCanvas');
 
 let morphImgA = null;   // { canvas } — pristine, fitted to outW×outH, never drawn on
 let morphImgB = null;
+let morphRawA = null;   // native-resolution source canvases, before fitting to the output format
+let morphRawB = null;
 let morphPoints = [];   // [{ ax, ay, bx, by, locked }] — index pairs A/B positions
 let morphSelectedIndex = -1;
 let morphDrag = null;   // { index, side }
@@ -473,9 +667,9 @@ morphOpenBtn.addEventListener('click', () => {
   morphPlaceholderA.textContent = 'Tap to choose start image';
   morphPlaceholderB.textContent = 'Tap to choose end image';
 
-  const outW = parseInt(outWidthInput.value) || 480;
-  const outH = parseInt(outHeightInput.value) || 480;
-  morphResDisplay.textContent = `${outW}×${outH}px`;
+  morphResDisplay.textContent = `${formatSelect.options[formatSelect.selectedIndex].text} · ${resolutionSelect.options[resolutionSelect.selectedIndex].text}`;
+  morphRawA = null;
+  morphRawB = null;
 
   morphUploadStep.hidden = false;
   morphPointStep.hidden = true;
@@ -512,8 +706,6 @@ morphFileB.addEventListener('change', () => { handleMorphUpload('b', morphFileB.
 
 async function handleMorphUpload(side, file) {
   if (!file) return;
-  const outW = parseInt(outWidthInput.value) || 480;
-  const outH = parseInt(outHeightInput.value) || 480;
 
   let bitmap;
   try {
@@ -522,30 +714,33 @@ async function handleMorphUpload(side, file) {
     alert(`Could not load "${file.name}" as an image.`);
     return;
   }
-  const canvas = document.createElement('canvas');
-  canvas.width = outW;
-  canvas.height = outH;
-  drawContainFit(canvas.getContext('2d'), bitmap, bitmap.width, bitmap.height, outW, outH);
+  const raw = document.createElement('canvas');
+  raw.width = bitmap.width;
+  raw.height = bitmap.height;
+  raw.getContext('2d').drawImage(bitmap, 0, 0);
   bitmap.close();
 
   const slot = side === 'a' ? morphSlotA : morphSlotB;
   const preview = side === 'a' ? morphPreviewA : morphPreviewB;
   const placeholder = side === 'a' ? morphPlaceholderA : morphPlaceholderB;
 
-  canvas.toBlob((blob) => {
-    const url = URL.createObjectURL(blob);
-    if (side === 'a') { if (morphPreviewUrlA) URL.revokeObjectURL(morphPreviewUrlA); morphPreviewUrlA = url; }
-    else { if (morphPreviewUrlB) URL.revokeObjectURL(morphPreviewUrlB); morphPreviewUrlB = url; }
-    preview.src = url;
-    preview.hidden = false;
-    placeholder.hidden = true;
-    slot.classList.add('filled');
-  });
+  // The slot preview uses the original file directly (cheap, even for huge images).
+  const url = URL.createObjectURL(file);
+  if (side === 'a') { if (morphPreviewUrlA) URL.revokeObjectURL(morphPreviewUrlA); morphPreviewUrlA = url; }
+  else { if (morphPreviewUrlB) URL.revokeObjectURL(morphPreviewUrlB); morphPreviewUrlB = url; }
+  preview.src = url;
+  preview.hidden = false;
+  placeholder.hidden = true;
+  slot.classList.add('filled');
 
-  if (side === 'a') morphImgA = { canvas }; else morphImgB = { canvas };
+  if (side === 'a') morphRawA = raw; else morphRawB = raw;
 
-  if (morphImgA && morphImgB) {
-    startMorphPointEditor(outW, outH);
+  if (morphRawA && morphRawB) {
+    // Fit both to the shared output format (Format / Resolution / Background of the main page).
+    const { W, H } = getOutputSize([morphRawA, morphRawB]);
+    morphImgA = { canvas: renderFrameTo({ canvas: morphRawA, crop: defaultCrop() }, W, H) };
+    morphImgB = { canvas: renderFrameTo({ canvas: morphRawB, crop: defaultCrop() }, W, H) };
+    startMorphPointEditor(W, H);
   }
 }
 
@@ -567,6 +762,9 @@ function startMorphPointEditor(outW, outH) {
   morphCanvasB.height = outH;
   morphUploadStep.hidden = true;
   morphPointStep.hidden = false;
+  const bigHint = document.getElementById('morphSizeHint');
+  bigHint.hidden = outW * outH <= 4e6;
+  bigHint.textContent = `Large size (${outW}×${outH}) — rendering uses a lot of memory and may be slow on phones. Pick a lower Resolution on the main page if it struggles.`;
   renderMorphEditorCanvases();
 }
 
@@ -578,8 +776,14 @@ function renderMorphEditorCanvases() {
   morphDeletePointBtn.disabled = morphSelectedIndex === -1;
 }
 
+function morphDisplayScale(canvas) {
+  const w = canvas.getBoundingClientRect().width;
+  return w > 0 ? canvas.width / w : 1; // canvas px per screen px, so markers keep a constant on-screen size
+}
+
 function drawMorphSide(canvas, baseCanvas, side) {
   const ctx = canvas.getContext('2d');
+  const k = morphDisplayScale(canvas);
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   ctx.drawImage(baseCanvas, 0, 0);
   morphPoints.forEach((p, i) => {
@@ -587,10 +791,10 @@ function drawMorphSide(canvas, baseCanvas, side) {
     const y = side === 'a' ? p.ay : p.by;
     const selected = i === morphSelectedIndex;
     ctx.beginPath();
-    ctx.arc(x, y, selected ? 9 : 7, 0, Math.PI * 2);
+    ctx.arc(x, y, (selected ? 9 : 7) * k, 0, Math.PI * 2);
     ctx.fillStyle = p.locked ? 'rgba(160,160,160,0.85)' : (selected ? '#ffffff' : '#4f8cff');
     ctx.fill();
-    ctx.lineWidth = 2;
+    ctx.lineWidth = 2 * k;
     ctx.strokeStyle = selected ? '#4f8cff' : 'rgba(0,0,0,0.5)';
     ctx.stroke();
   });
@@ -607,7 +811,7 @@ function morphCanvasCoords(canvas, evt) {
 }
 
 function hitTestMorphPoint(side, x, y) {
-  const threshold = 16; // canvas px
+  const threshold = 16 * morphDisplayScale(side === 'a' ? morphCanvasA : morphCanvasB); // ~16 screen px
   let best = -1;
   let bestDist = threshold;
   morphPoints.forEach((p, i) => {
@@ -826,9 +1030,11 @@ function renderMorphFrame(t, triangles, ptsA, ptsB, canvasA, canvasB, outW, outH
   out.width = outW;
   out.height = outH;
   const ctx = out.getContext('2d');
-  ctx.fillStyle = '#ffffff';
-  ctx.fillRect(0, 0, outW, outH);
-  ctx.globalAlpha = 1 - t;
+  // Start layer fully opaque, end layer on top at alpha t => exactly A*(1-t) + B*t.
+  // (Fading both with alpha over a white base would let white bleed through
+  // mid-transition and flash the GIF brighter.) The un-warped start image
+  // underneath only covers hairline seams between triangles.
+  ctx.drawImage(canvasA, 0, 0);
   ctx.drawImage(layerA, 0, 0);
   ctx.globalAlpha = t;
   ctx.drawImage(layerB, 0, 0);
@@ -843,9 +1049,6 @@ function renderFadeFrame(t, canvasA, canvasB, outW, outH) {
   out.width = outW;
   out.height = outH;
   const ctx = out.getContext('2d');
-  ctx.fillStyle = '#ffffff';
-  ctx.fillRect(0, 0, outW, outH);
-  ctx.globalAlpha = 1 - t;
   ctx.drawImage(canvasA, 0, 0);
   ctx.globalAlpha = t;
   ctx.drawImage(canvasB, 0, 0);

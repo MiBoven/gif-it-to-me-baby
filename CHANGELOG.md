@@ -2,6 +2,15 @@
 
 All notable changes to GIF it to me Baby are documented here.
 
+## 0.5.0 — 2026-11-04 — Canvas format, crop & full resolution
+
+- Fixed: morph and fade GIFs flashed brighter mid-transition — both images were faded over a white base, letting up to 25 % white bleed through; the start image is now drawn opaque with the end image on top at alpha t
+- New **Canvas** card replaces the Width × Height fields: **Format** (aspect ratio presets, like first frame, or custom), **Resolution** (short-side presets, custom, or *Original (max.)*) and **Background** (color or blur)
+- New per-frame **crop & position editor** (✂): drag to move, slider/wheel to zoom, *Fit*, *Fill*, *Reset*, and *Apply to all frames*
+- Frame thumbnails now show each frame as it will appear in the output
+- Morph and fade now use the Canvas settings, so they can run at the images' full original resolution (up to 4096 px on the long side); control-point markers keep a constant on-screen size on large images
+- Default resolution is now 720p instead of the first image's native size (choose *Original (max.)* for the old behavior)
+
 ## 0.4.0 — 2026-11-04 — Fade option & preview
 
 - The morph tool now offers a **Fade (crossfade)** mode next to **Morph (control points)**, switchable after picking both images; fade needs no point placement
